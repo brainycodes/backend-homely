@@ -18,7 +18,8 @@ const app = express();
 app.use(cors({
   origin: [
     'http://localhost:3000',  // Local frontend
-    'https://homely-theta.vercel.app/',   // All Vercel deployments
+    'https://homely-theta.vercel.app/',
+    'https://homely-theta.vercel.app',   // All Vercel deployments
     process.env.CLIENT_URL || 'http://localhost:3000'
   ],
   credentials: true
