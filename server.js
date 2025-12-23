@@ -5,6 +5,12 @@ const cors = require('cors');
 const path = require('path');
 const mongoose = require('mongoose');
 
+const authRoutes = require('./routes/authRoutes');
+const propertyRoutes = require('./routes/propertyRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+const adminPropertyRoutes = require('./routes/adminPropertyRoutes');
+const profileRoutes = require('./routes/profileRoutes');
+
 // Initialize express
 const app = express();
 
@@ -12,7 +18,7 @@ const app = express();
 app.use(cors({
   origin: [
     'http://localhost:3000',  // Local frontend
-    'https://homely-theta.vercel.app',   // All Vercel deployments
+    'https://homely-theta.vercel.app/',   // All Vercel deployments
     process.env.CLIENT_URL || 'http://localhost:3000'
   ],
   credentials: true
@@ -63,11 +69,11 @@ app.get('/test', (req, res) => {
 });
 
 // Import your actual routes
-app.use('/api/auth', require('./src/routes/authRoutes'));
-app.use('/api/properties', require('./src/routes/propertyRoutes'));
-app.use('/api/admin', require('./src/routes/adminRoutes'));
-app.use('/api/admin-properties', require('./src/routes/adminPropertyRoutes'));
-app.use('/api/profile', require('./src/routes/profileRoutes'));
+app.use('/api/auth', authRoutes);
+app.use('/api/properties', propertyRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/admin-properties', adminPropertyRoutes);
+app.use('/api/profile', profileRoutes);
 
 // ========== ERROR HANDLING ==========
 // 404 handler
@@ -87,13 +93,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ========== EXPORT & START ==========
-// Always export the app (for Vercel)
-module.exports = app;
 
-// Check if this file is being run directly (not imported)
-// This works for both local and Vercel
-if (require.main === module) {
   // This means we're running: node server.js
   const PORT = process.env.PORT || 5000;
   
@@ -111,4 +111,3 @@ if (require.main === module) {
   };
 
   startServer();
-}

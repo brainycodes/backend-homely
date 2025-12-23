@@ -1,4 +1,3 @@
-// src/routes/propertyRoutes.js
 const express = require('express');
 const router = express.Router();
 const propertyController = require('../controllers/propertyController');
@@ -33,13 +32,13 @@ const propertyValidation = [
   check('contactPhone', 'Contact phone is required').notEmpty().trim()
 ];
 
-// ========== PUBLIC ROUTES (No auth required) ==========
+// Public routes
 router.get('/', propertyController.getAllProperties);
 router.get('/featured', propertyController.getFeaturedProperties);
 router.get('/:id', propertyController.getPropertyById);
 router.get('/:id/related', propertyController.getRelatedProperties);
 
-// ========== PROTECTED ROUTES (Require auth) ==========
+// Protected routes (require authentication)
 router.use(authMiddleware.protect);
 
 // User property management
@@ -49,26 +48,25 @@ router.get('/user/activity', propertyController.getRecentActivity);
 router.get('/user/saved', propertyController.getSavedProperties);
 router.post('/:id/save', propertyController.toggleSaveProperty);
 
-// Create property (with upload middleware)
+// Create property
 router.post(
   '/',
-  uploadMiddleware,  // Only for POST requests with files
+  uploadMiddleware,
   propertyValidation,
   propertyController.createProperty
 );
 
-// Update property (with upload middleware)
+// Property owner or admin routes
 router.put(
   '/:id',
-  uploadMiddleware,  // Only for PUT requests with files
+  uploadMiddleware,
   propertyValidation,
   propertyController.updateProperty
 );
 
-// Delete property
 router.delete('/:id', propertyController.deleteProperty);
 
-// ========== ADMIN ROUTES ==========
+// Admin only routes
 router.use(authMiddleware.restrictTo('admin'));
 
 router.patch('/:id/toggle-featured', propertyController.toggleFeatured);
