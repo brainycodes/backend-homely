@@ -94,9 +94,8 @@ const propertySchema = new mongoose.Schema({
   }],
   images: [{
     url: { type: String, required: true },
-    public_id: { type: String },
+    public_id: { type: String, required: true }, // Cloudinary public_id
     isPrimary: { type: Boolean, default: false },
-    filename: { type: String },
     originalname: { type: String },
     mimetype: { type: String },
     size: { type: Number }
@@ -177,7 +176,7 @@ const propertySchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Generate property ID before saving
+// Generate property ID before saving - CLEANED VERSION (no file references)
 propertySchema.pre('save', async function() {
   // Generate property ID if not exists
   if (!this.propertyId) {
@@ -188,16 +187,20 @@ propertySchema.pre('save', async function() {
   }
   
   // Set agent info from postedBy if not provided
-  if (!this.agent.name && this.populated('postedBy')) {
-    const user = await mongoose.model('User').findById(this.postedBy);
-    if (user) {
-      this.agent = {
-        name: `${user.firstName} ${user.lastName}`,
-        role: user.userType === 'agent-landlord' ? 'Real Estate Agent' : 'Landlord',
-        phone: user.phone || '',
-        email: user.email,
-        avatar: user.profileImage || ''
-      };
+  if (!this.agent.name && this.postedBy) {
+    try {
+      const user = await mongoose.model('User').findById(this.postedBy);
+      if (user) {
+        this.agent = {
+          name: `${user.firstName} ${user.lastName}`,
+          role: user.userType === 'agent-landlord' ? 'Real Estate Agent' : 'Landlord',
+          phone: user.phone || '',
+          email: user.email,
+          avatar: user.profileImage || ''
+        };
+      }
+    } catch (error) {
+      console.error('Error setting agent info:', error);
     }
   }
 });

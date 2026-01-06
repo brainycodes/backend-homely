@@ -2,8 +2,7 @@ const Property = require('../models/Property');
 const User = require('../models/User');
 const { validationResult } = require('express-validator');
 const moment = require('moment');
-const fs = require('fs');
-const path = require('path');
+const cloudinary = require('../config/cloudinary');
 
 class PropertyController {
   // Create new property
@@ -11,15 +10,6 @@ class PropertyController {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
-        // Clean up uploaded files if validation fails
-        if (req.files && req.files.length > 0) {
-          req.files.forEach(file => {
-            const filePath = path.join(__dirname, '../uploads/properties', file.filename);
-            if (fs.existsSync(filePath)) {
-              fs.unlinkSync(filePath);
-            }
-          });
-        }
         return res.status(400).json({
           success: false,
           errors: errors.array()
@@ -31,55 +21,62 @@ class PropertyController {
       
       // Check if user is agent-landlord
       if (user.userType !== 'agent-landlord') {
-        // Clean up uploaded files if not authorized
-        if (req.files && req.files.length > 0) {
-          req.files.forEach(file => {
-            const filePath = path.join(__dirname, '../uploads/properties', file.filename);
-            if (fs.existsSync(filePath)) {
-              fs.unlinkSync(filePath);
-            }
-          });
-        }
         return res.status(403).json({
           success: false,
           message: 'Only agents and landlords can create properties'
         });
       }
       
-      // Handle image upload - Save file paths
+      // Handle image upload to Cloudinary
       let images = [];
       if (req.files && req.files.length > 0) {
-        images = req.files.map((file, index) => ({
-          url: `/uploads/properties/${file.filename}`, // This will be served statically
-          public_id: `property_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          isPrimary: index === 0,
-          filename: file.filename,
-          originalname: file.originalname,
-          mimetype: file.mimetype,
-          size: file.size
-        }));
+        // Upload each image to Cloudinary
+        const uploadPromises = req.files.map(async (file, index) => {
+          const b64 = Buffer.from(file.buffer).toString('base64');
+          const dataURI = `data:${file.mimetype};base64,${b64}`;
+          
+          const result = await cloudinary.uploader.upload(dataURI, {
+            folder: 'properties',
+            public_id: `property_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            transformation: [
+              { width: 1200, height: 800, crop: 'fill', quality: 'auto:good' }
+            ]
+          });
+          
+          return {
+            url: result.secure_url,
+            public_id: result.public_id,
+            isPrimary: index === 0,
+            originalname: file.originalname,
+            mimetype: file.mimetype,
+            size: file.size
+          };
+        });
+        
+        images = await Promise.all(uploadPromises);
       } else if (req.body.images && req.body.images.trim() !== '') {
         // Fallback for base64 images if provided
         const imageArray = Array.isArray(req.body.images) ? req.body.images : [req.body.images];
         images = imageArray.map((img, index) => ({
           url: img,
           public_id: `property_${Date.now()}_${index}`,
-          isPrimary: index === 0,
-          filename: `base64_image_${index}.jpg`
+          isPrimary: index === 0
         }));
       }
       
-      // Create property data
+      // Create property data - FIXED: Ensure postedBy has all needed fields
       const propertyData = {
         ...req.body,
         postedBy: userId,
         images,
         agent: {
+          id: userId,
           name: `${user.firstName} ${user.lastName}`,
+          profileImage: user.profileImage || '',
           role: user.userType === 'agent-landlord' ? 'Real Estate Agent' : 'Landlord',
           phone: user.phone || '',
           email: user.email,
-          avatar: user.profileImage || ''
+          avatar: user.profileImage || '' // Keep avatar for backward compatibility
         },
         contactInfo: {
           phone: req.body.contactPhone || user.phone,
@@ -118,26 +115,32 @@ class PropertyController {
       const property = new Property(propertyData);
       await property.save();
       
-      // Populate the postedBy field
+      // Populate the postedBy field with all needed fields
       const populatedProperty = await Property.findById(property._id)
-        .populate('postedBy', 'firstName lastName email phone');
+        .populate('postedBy', 'firstName lastName email phone userType profileImage createdAt updatedAt');
+      
+      // Format the response to ensure consistent structure
+      const responseProperty = {
+        ...populatedProperty.toObject(),
+        postedBy: {
+          id: populatedProperty.postedBy._id,
+          firstName: populatedProperty.postedBy.firstName,
+          lastName: populatedProperty.postedBy.lastName,
+          email: populatedProperty.postedBy.email,
+          phone: populatedProperty.postedBy.phone,
+          userType: populatedProperty.postedBy.userType,
+          profileImage: populatedProperty.postedBy.profileImage,
+          avatar: populatedProperty.postedBy.profileImage // Add avatar as alias
+        }
+      };
       
       res.status(201).json({
         success: true,
         message: 'Property created successfully',
-        property: populatedProperty
+        property: responseProperty
       });
       
     } catch (error) {
-      // Clean up uploaded files on error
-      if (req.files && req.files.length > 0) {
-        req.files.forEach(file => {
-          const filePath = path.join(__dirname, '../uploads/properties', file.filename);
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-          }
-        });
-      }
       console.error('Create property error:', error);
       res.status(500).json({
         success: false,
@@ -147,7 +150,7 @@ class PropertyController {
     }
   }
   
-  // Get all properties (with filters) - Featured First
+  // Get all properties (with filters) - Featured First - FIXED
   async getAllProperties(req, res) {
     try {
       const page = parseInt(req.query.page) || 1;
@@ -179,41 +182,44 @@ class PropertyController {
       
       // Get properties with featured sorting first
       const properties = await Property.find(query)
-        .populate('postedBy', 'firstName lastName email phone userType')
-        .sort({ featured: -1, createdAt: -1 }) // Featured first, then newest
+        .populate('postedBy', 'firstName lastName email phone userType profileImage')
+        .sort({ featured: -1, createdAt: -1 })
         .skip(skip)
         .limit(limit);
       
-      // Construct full image URLs with protocol and host
-      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      // Format properties with consistent structure - FIXED
       const formattedProperties = properties.map(property => {
         const propertyObj = property.toObject();
         
-        // Handle image URLs
-        if (propertyObj.images && Array.isArray(propertyObj.images)) {
-          propertyObj.images = propertyObj.images.map(img => {
-            if (img.url && (img.url.startsWith('http') || img.url.startsWith('data:'))) {
-              return img;
-            }
-            if (img.url && img.url.startsWith('/')) {
-              return {
-                ...img,
-                url: `${baseUrl}${img.url}`
-              };
-            }
-            // For uploaded files
-            if (img.filename) {
-              return {
-                ...img,
-                url: `${baseUrl}/uploads/properties/${img.filename}`
-              };
-            }
-            return img;
-          });
+        // Ensure postedBy has both profileImage and avatar fields
+        let postedByData = {};
+        if (propertyObj.postedBy) {
+          postedByData = {
+            id: propertyObj.postedBy._id,
+            firstName: propertyObj.postedBy.firstName,
+            lastName: propertyObj.postedBy.lastName,
+            email: propertyObj.postedBy.email,
+            phone: propertyObj.postedBy.phone,
+            userType: propertyObj.postedBy.userType,
+            profileImage: propertyObj.postedBy.profileImage || '',
+            avatar: propertyObj.postedBy.profileImage || '' // Add avatar as alias
+          };
+        }
+        
+        // Ensure agent has both profileImage and avatar fields
+        let agentData = {};
+        if (propertyObj.agent) {
+          agentData = {
+            ...propertyObj.agent,
+            profileImage: propertyObj.agent.profileImage || propertyObj.agent.avatar || '',
+            avatar: propertyObj.agent.avatar || propertyObj.agent.profileImage || ''
+          };
         }
         
         return {
           ...propertyObj,
+          postedBy: postedByData,
+          agent: agentData,
           createdAtFormatted: moment(property.createdAt).fromNow(),
           availableDateFormatted: property.availableDate ? 
             moment(property.availableDate).format('MMMM Do, YYYY') : null
@@ -238,7 +244,7 @@ class PropertyController {
     }
   }
 
-  // Get single property by ID
+  // Get single property by ID - FIXED
   async getPropertyById(req, res) {
     try {
       const property = await Property.findById(req.params.id)
@@ -252,29 +258,27 @@ class PropertyController {
         });
       }
       
-      // Construct full image URLs with protocol and host
-      const baseUrl = `${req.protocol}://${req.get('host')}`;
-      if (property.images && Array.isArray(property.images)) {
-        property.images = property.images.map(img => {
-          // If image URL is already a full URL or data URL, use it as is
-          if (img.url.startsWith('http') || img.url.startsWith('data:')) {
-            return img;
-          }
-          
-          // If it's a relative path, prepend with base URL
-          if (img.url.startsWith('/')) {
-            return {
-              ...img,
-              url: `${baseUrl}${img.url}`
-            };
-          }
-          
-          // If it's just a filename, construct the full path
-          return {
-            ...img,
-            url: `${baseUrl}/uploads/properties/${img.filename || img.url}`
-          };
-        });
+      // Ensure postedBy has consistent structure
+      if (property.postedBy) {
+        property.postedBy = {
+          id: property.postedBy._id,
+          firstName: property.postedBy.firstName,
+          lastName: property.postedBy.lastName,
+          email: property.postedBy.email,
+          phone: property.postedBy.phone,
+          userType: property.postedBy.userType,
+          profileImage: property.postedBy.profileImage || '',
+          avatar: property.postedBy.profileImage || '' // Add avatar as alias
+        };
+      }
+      
+      // Ensure agent has consistent structure
+      if (property.agent) {
+        property.agent = {
+          ...property.agent,
+          profileImage: property.agent.profileImage || property.agent.avatar || '',
+          avatar: property.agent.avatar || property.agent.profileImage || ''
+        };
       }
       
       // Format dates using moment
@@ -302,20 +306,11 @@ class PropertyController {
     }
   }
   
-  // Update property
+  // Update property - FIXED
   async updateProperty(req, res) {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
-        // Clean up uploaded files if validation fails
-        if (req.files && req.files.length > 0) {
-          req.files.forEach(file => {
-            const filePath = path.join(__dirname, '../uploads/properties', file.filename);
-            if (fs.existsSync(filePath)) {
-              fs.unlinkSync(filePath);
-            }
-          });
-        }
         return res.status(400).json({
           success: false,
           errors: errors.array()
@@ -325,15 +320,6 @@ class PropertyController {
       const property = await Property.findById(req.params.id);
       
       if (!property) {
-        // Clean up uploaded files
-        if (req.files && req.files.length > 0) {
-          req.files.forEach(file => {
-            const filePath = path.join(__dirname, '../uploads/properties', file.filename);
-            if (fs.existsSync(filePath)) {
-              fs.unlinkSync(filePath);
-            }
-          });
-        }
         return res.status(404).json({
           success: false,
           message: 'Property not found'
@@ -342,15 +328,6 @@ class PropertyController {
       
       // Check if user owns the property or is admin
       if (property.postedBy.toString() !== req.user.id && req.user.role !== 'admin') {
-        // Clean up uploaded files
-        if (req.files && req.files.length > 0) {
-          req.files.forEach(file => {
-            const filePath = path.join(__dirname, '../uploads/properties', file.filename);
-            if (fs.existsSync(filePath)) {
-              fs.unlinkSync(filePath);
-            }
-          });
-        }
         return res.status(403).json({
           success: false,
           message: 'Not authorized to update this property'
@@ -360,40 +337,52 @@ class PropertyController {
       // Handle image updates
       let images = property.images || [];
       
-      // Delete specified images
+      // Delete specified images from Cloudinary
       if (req.body.imagesToDelete) {
         const imagesToDelete = Array.isArray(req.body.imagesToDelete) 
           ? req.body.imagesToDelete 
           : req.body.imagesToDelete.split(',');
         
-        // Remove from array and delete files from server
+        // Filter out deleted images and remove from Cloudinary
         const imagesToRemove = images.filter(img => imagesToDelete.includes(img.public_id));
         
-        images = images.filter(img => !imagesToDelete.includes(img.public_id));
-        
-        // Delete files from server
-        imagesToRemove.forEach(img => {
-          if (img.filename && img.filename.startsWith('property-')) {
-            const filePath = path.join(__dirname, '../uploads/properties', img.filename);
-            if (fs.existsSync(filePath)) {
-              fs.unlinkSync(filePath);
-            }
+        // Delete from Cloudinary
+        const deletePromises = imagesToRemove.map(async (img) => {
+          if (img.public_id) {
+            await cloudinary.uploader.destroy(img.public_id);
           }
         });
+        await Promise.all(deletePromises);
+        
+        // Update images array
+        images = images.filter(img => !imagesToDelete.includes(img.public_id));
       }
       
-      // Add new images
+      // Add new images to Cloudinary
       if (req.files && req.files.length > 0) {
-        const newImages = req.files.map((file, index) => ({
-          url: `/uploads/properties/${file.filename}`,
-          public_id: `property_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          isPrimary: images.length === 0 && index === 0,
-          filename: file.filename,
-          originalname: file.originalname,
-          mimetype: file.mimetype,
-          size: file.size
-        }));
+        const uploadPromises = req.files.map(async (file, index) => {
+          const b64 = Buffer.from(file.buffer).toString('base64');
+          const dataURI = `data:${file.mimetype};base64,${b64}`;
+          
+          const result = await cloudinary.uploader.upload(dataURI, {
+            folder: 'properties',
+            public_id: `property_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            transformation: [
+              { width: 1200, height: 800, crop: 'fill', quality: 'auto:good' }
+            ]
+          });
+          
+          return {
+            url: result.secure_url,
+            public_id: result.public_id,
+            isPrimary: images.length === 0 && index === 0,
+            originalname: file.originalname,
+            mimetype: file.mimetype,
+            size: file.size
+          };
+        });
         
+        const newImages = await Promise.all(uploadPromises);
         images = [...images, ...newImages];
       }
       
@@ -406,7 +395,7 @@ class PropertyController {
       // Convert string arrays to arrays
       if (req.body.amenities) {
         updateData.amenities = Array.isArray(req.body.amenities) 
-          ? req.body.amenities 
+          ? updateData.amenities 
           : req.body.amenities.split(',').map(item => item.trim());
       }
       
@@ -425,24 +414,30 @@ class PropertyController {
         req.params.id,
         updateData,
         { new: true, runValidators: true }
-      ).populate('postedBy', 'firstName lastName email phone');
+      ).populate('postedBy', 'firstName lastName email phone userType profileImage');
+      
+      // Format response
+      const responseProperty = {
+        ...updatedProperty.toObject(),
+        postedBy: updatedProperty.postedBy ? {
+          id: updatedProperty.postedBy._id,
+          firstName: updatedProperty.postedBy.firstName,
+          lastName: updatedProperty.postedBy.lastName,
+          email: updatedProperty.postedBy.email,
+          phone: updatedProperty.postedBy.phone,
+          userType: updatedProperty.postedBy.userType,
+          profileImage: updatedProperty.postedBy.profileImage || '',
+          avatar: updatedProperty.postedBy.profileImage || ''
+        } : null
+      };
       
       res.status(200).json({
         success: true,
         message: 'Property updated successfully',
-        property: updatedProperty
+        property: responseProperty
       });
       
     } catch (error) {
-      // Clean up uploaded files on error
-      if (req.files && req.files.length > 0) {
-        req.files.forEach(file => {
-          const filePath = path.join(__dirname, '../uploads/properties', file.filename);
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-          }
-        });
-      }
       console.error('Update property error:', error);
       res.status(500).json({
         success: false,
@@ -472,6 +467,16 @@ class PropertyController {
         });
       }
       
+      // Delete images from Cloudinary
+      if (property.images && property.images.length > 0) {
+        const deletePromises = property.images.map(async (img) => {
+          if (img.public_id) {
+            await cloudinary.uploader.destroy(img.public_id);
+          }
+        });
+        await Promise.all(deletePromises);
+      }
+      
       await Property.findByIdAndDelete(req.params.id);
       
       res.status(200).json({
@@ -489,7 +494,7 @@ class PropertyController {
     }
   }
   
-  // Get user's properties
+  // Get user's properties - FIXED
   async getUserProperties(req, res) {
     try {
       const page = parseInt(req.query.page) || 1;
@@ -497,19 +502,38 @@ class PropertyController {
       const skip = (page - 1) * limit;
       
       const properties = await Property.find({ postedBy: req.user.id })
+        .populate('postedBy', 'firstName lastName email phone userType profileImage')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean();
       
-      // Format dates using moment
-      const formattedProperties = properties.map(property => ({
-        ...property,
-        createdAtFormatted: moment(property.createdAt).fromNow(),
-        updatedAtFormatted: moment(property.updatedAt).fromNow(),
-        availableDateFormatted: property.availableDate ? 
-          moment(property.availableDate).format('MMMM Do, YYYY') : null
-      }));
+      // Format properties with consistent structure
+      const formattedProperties = properties.map(property => {
+        // Ensure postedBy has consistent structure
+        let postedByData = {};
+        if (property.postedBy) {
+          postedByData = {
+            id: property.postedBy._id,
+            firstName: property.postedBy.firstName,
+            lastName: property.postedBy.lastName,
+            email: property.postedBy.email,
+            phone: property.postedBy.phone,
+            userType: property.postedBy.userType,
+            profileImage: property.postedBy.profileImage || '',
+            avatar: property.postedBy.profileImage || ''
+          };
+        }
+        
+        return {
+          ...property,
+          postedBy: postedByData,
+          createdAtFormatted: moment(property.createdAt).fromNow(),
+          updatedAtFormatted: moment(property.updatedAt).fromNow(),
+          availableDateFormatted: property.availableDate ? 
+            moment(property.availableDate).format('MMMM Do, YYYY') : null
+        };
+      });
       
       const total = await Property.countDocuments({ postedBy: req.user.id });
       
@@ -600,7 +624,7 @@ class PropertyController {
     }
   }
   
-  // Get related properties
+  // Get related properties - FIXED
   async getRelatedProperties(req, res) {
     try {
       const property = await Property.findById(req.params.id);
@@ -619,15 +643,32 @@ class PropertyController {
         isActive: true,
         isVerified: true
       })
+      .populate('postedBy', 'firstName lastName userType profileImage')
       .limit(4)
       .sort({ featured: -1, createdAt: -1 })
       .lean();
       
-      // Format dates using moment
-      const formattedProperties = relatedProperties.map(prop => ({
-        ...prop,
-        createdAtFormatted: moment(prop.createdAt).fromNow()
-      }));
+      // Format properties with consistent structure
+      const formattedProperties = relatedProperties.map(prop => {
+        // Ensure postedBy has consistent structure
+        let postedByData = {};
+        if (prop.postedBy) {
+          postedByData = {
+            id: prop.postedBy._id,
+            firstName: prop.postedBy.firstName,
+            lastName: prop.postedBy.lastName,
+            userType: prop.postedBy.userType,
+            profileImage: prop.postedBy.profileImage || '',
+            avatar: prop.postedBy.profileImage || ''
+          };
+        }
+        
+        return {
+          ...prop,
+          postedBy: postedByData,
+          createdAtFormatted: moment(prop.createdAt).fromNow()
+        };
+      });
       
       res.status(200).json({
         success: true,
@@ -696,21 +737,41 @@ class PropertyController {
     }
   }
   
-  // Get saved properties
+  // Get saved properties - FIXED
   async getSavedProperties(req, res) {
     try {
       const user = await User.findById(req.user.id)
         .populate({
           path: 'savedProperties',
+          populate: {
+            path: 'postedBy',
+            select: 'firstName lastName userType profileImage'
+          },
           options: { sort: { createdAt: -1 } }
         })
         .lean();
       
-      // Format dates using moment
-      const formattedProperties = (user.savedProperties || []).map(property => ({
-        ...property,
-        createdAtFormatted: moment(property.createdAt).fromNow()
-      }));
+      // Format properties with consistent structure
+      const formattedProperties = (user.savedProperties || []).map(property => {
+        // Ensure postedBy has consistent structure
+        let postedByData = {};
+        if (property.postedBy) {
+          postedByData = {
+            id: property.postedBy._id,
+            firstName: property.postedBy.firstName,
+            lastName: property.postedBy.lastName,
+            userType: property.postedBy.userType,
+            profileImage: property.postedBy.profileImage || '',
+            avatar: property.postedBy.profileImage || ''
+          };
+        }
+        
+        return {
+          ...property,
+          postedBy: postedByData,
+          createdAtFormatted: moment(property.createdAt).fromNow()
+        };
+      });
       
       res.status(200).json({
         success: true,
@@ -727,7 +788,7 @@ class PropertyController {
     }
   }
   
-  // Get featured properties
+  // Get featured properties - FIXED
   async getFeaturedProperties(req, res) {
     try {
       const properties = await Property.find({
@@ -735,16 +796,32 @@ class PropertyController {
         isActive: true,
         isVerified: true
       })
+      .populate('postedBy', 'firstName lastName userType profileImage')
       .limit(6)
       .sort({ createdAt: -1 })
-      .populate('postedBy', 'firstName lastName')
       .lean();
       
-      // Format dates using moment
-      const formattedProperties = properties.map(property => ({
-        ...property,
-        createdAtFormatted: moment(property.createdAt).fromNow()
-      }));
+      // Format properties with consistent structure
+      const formattedProperties = properties.map(property => {
+        // Ensure postedBy has consistent structure
+        let postedByData = {};
+        if (property.postedBy) {
+          postedByData = {
+            id: property.postedBy._id,
+            firstName: property.postedBy.firstName,
+            lastName: property.postedBy.lastName,
+            userType: property.postedBy.userType,
+            profileImage: property.postedBy.profileImage || '',
+            avatar: property.postedBy.profileImage || ''
+          };
+        }
+        
+        return {
+          ...property,
+          postedBy: postedByData,
+          createdAtFormatted: moment(property.createdAt).fromNow()
+        };
+      });
       
       res.status(200).json({
         success: true,
@@ -877,6 +954,46 @@ class PropertyController {
       res.status(500).json({
         success: false,
         message: 'Error fetching recent activity',
+        error: error.message
+      });
+    }
+  }
+  
+  // Test endpoint for debugging
+  async testPropertyData(req, res) {
+    try {
+      const property = await Property.findById(req.params.id)
+        .populate('postedBy', 'firstName lastName email phone userType profileImage')
+        .lean();
+      
+      if (!property) {
+        return res.status(404).json({
+          success: false,
+          message: 'Property not found'
+        });
+      }
+      
+      // Log the structure for debugging
+      console.log('Property postedBy structure:', JSON.stringify(property.postedBy, null, 2));
+      
+      res.status(200).json({
+        success: true,
+        property,
+        debug: {
+          postedByHasProfileImage: !!property.postedBy?.profileImage,
+          postedByFields: Object.keys(property.postedBy || {}),
+          postedByProfileImageValue: property.postedBy?.profileImage,
+          propertyAgentFields: Object.keys(property.agent || {}),
+          propertyAgentAvatar: property.agent?.avatar,
+          propertyAgentProfileImage: property.agent?.profileImage
+        }
+      });
+      
+    } catch (error) {
+      console.error('Test property data error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error testing property data',
         error: error.message
       });
     }

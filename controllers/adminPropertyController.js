@@ -18,11 +18,12 @@ exports.getPendingProperties = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    // Find properties that are not verified OR not active
+    // Find properties that are not verified OR not active OR pending
     const query = {
       $or: [
         { isVerified: false },
-        { isActive: false }
+        { isActive: false },
+        { status: 'pending' }
       ]
     };
 
@@ -49,11 +50,17 @@ exports.getPendingProperties = async (req, res) => {
 
     const total = await Property.countDocuments(query);
 
-    // Calculate statistics
+    // Calculate statistics - including featured properties
     const stats = {
-      pending: await Property.countDocuments({ isVerified: false, isActive: true }),
+      pending: await Property.countDocuments({ 
+        $or: [
+          { isVerified: false },
+          { isActive: false }
+        ]
+      }),
       inactive: await Property.countDocuments({ isActive: false }),
       unverified: await Property.countDocuments({ isVerified: false }),
+      featured: await Property.countDocuments({ featured: true }), // Add featured count
       total: total
     };
 
@@ -159,7 +166,7 @@ exports.getPendingPropertyById = async (req, res) => {
   }
 };
 
-// @desc    Approve property
+// @desc    Approve property (and optionally mark as featured)
 // @route   PUT /api/admin/properties/:id/approve
 // @access  Private (Admin with manageProperties permission)
 exports.approveProperty = async (req, res) => {
@@ -172,7 +179,7 @@ exports.approveProperty = async (req, res) => {
       });
     }
 
-    const { verificationNotes } = req.body;
+    const { verificationNotes, makeFeatured = true } = req.body;
 
     const property = await Property.findById(req.params.id);
     
@@ -186,6 +193,10 @@ exports.approveProperty = async (req, res) => {
     // Update property
     property.isVerified = true;
     property.isActive = true;
+    
+    // Automatically mark as featured when approving (default is true)
+    property.featured = makeFeatured;
+    
     if (verificationNotes) {
       property.verificationNotes = verificationNotes;
     }
@@ -203,7 +214,7 @@ exports.approveProperty = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Property approved successfully',
+      message: `Property approved successfully${makeFeatured ? ' and marked as featured' : ''}`,
       data: populatedProperty
     });
 
@@ -251,6 +262,7 @@ exports.declineProperty = async (req, res) => {
     property.isActive = false;
     property.verificationNotes = `Declined: ${reason.trim()}`;
     property.status = 'pending'; // Keep as pending for admin review
+    property.featured = false; // Ensure declined properties are not featured
     
     await property.save();
 
@@ -348,6 +360,7 @@ exports.getPropertyStats = async (req, res) => {
       unverified: await Property.countDocuments({ isVerified: false }),
       active: await Property.countDocuments({ isActive: true }),
       inactive: await Property.countDocuments({ isActive: false }),
+      featured: await Property.countDocuments({ featured: true }), // Add featured count
       pendingReview: await Property.countDocuments({ 
         $or: [
           { isVerified: false },

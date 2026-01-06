@@ -1,6 +1,5 @@
 const User = require('../models/User');
-const path = require('path');
-const fs = require('fs');
+const cloudinary = require('../config/cloudinary');
 
 class ProfileController {
   // Get user profile
@@ -44,16 +43,29 @@ class ProfileController {
       
       // Handle profile image upload
       if (req.file) {
-        // Delete old profile image if exists
-        if (user.profileImage && user.profileImage.startsWith('/uploads/profile')) {
-          const oldImagePath = path.join(__dirname, '..', user.profileImage);
-          if (fs.existsSync(oldImagePath)) {
-            fs.unlinkSync(oldImagePath);
-          }
+        // Convert buffer to base64 for Cloudinary
+        const b64 = Buffer.from(req.file.buffer).toString('base64');
+        const dataURI = `data:${req.file.mimetype};base64,${b64}`;
+        
+        // Upload to Cloudinary
+        const result = await cloudinary.uploader.upload(dataURI, {
+          folder: 'profiles',
+          public_id: `user-${userId}`,
+          overwrite: true,
+          transformation: [
+            { width: 400, height: 400, crop: 'fill', gravity: 'face' },
+            { quality: 'auto:good' }
+          ]
+        });
+        
+        // Delete old profile image from Cloudinary if exists
+        if (user.profileImage && user.profileImage.includes('cloudinary')) {
+          const publicId = user.profileImage.split('/').slice(-2).join('/').split('.')[0];
+          await cloudinary.uploader.destroy(publicId);
         }
         
-        // Save new profile image path
-        user.profileImage = `/uploads/profile/${req.file.filename}`;
+        // Save new profile image URL
+        user.profileImage = result.secure_url;
       }
       
       // Update only fields that exist in schema
@@ -103,28 +115,35 @@ class ProfileController {
       const user = await User.findById(req.user.id);
       
       if (!user) {
-        // Delete uploaded file if user not found
-        const filePath = path.join(__dirname, '../uploads/profile', req.file.filename);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
-        
         return res.status(404).json({
           success: false,
           message: 'User not found'
         });
       }
       
-      // Delete old profile image if exists
-      if (user.profileImage && user.profileImage.startsWith('/uploads/profile')) {
-        const oldImagePath = path.join(__dirname, '..', user.profileImage);
-        if (fs.existsSync(oldImagePath)) {
-          fs.unlinkSync(oldImagePath);
-        }
+      // Convert buffer to base64 for Cloudinary
+      const b64 = Buffer.from(req.file.buffer).toString('base64');
+      const dataURI = `data:${req.file.mimetype};base64,${b64}`;
+      
+      // Upload to Cloudinary
+      const result = await cloudinary.uploader.upload(dataURI, {
+        folder: 'profiles',
+        public_id: `user-${req.user.id}`,
+        overwrite: true,
+        transformation: [
+          { width: 400, height: 400, crop: 'fill', gravity: 'face' },
+          { quality: 'auto:good' }
+        ]
+      });
+      
+      // Delete old profile image from Cloudinary if exists
+      if (user.profileImage && user.profileImage.includes('cloudinary')) {
+        const publicId = user.profileImage.split('/').slice(-2).join('/').split('.')[0];
+        await cloudinary.uploader.destroy(publicId);
       }
       
-      // Update user with new profile image
-      user.profileImage = `/uploads/profile/${req.file.filename}`;
+      // Update user with new profile image URL
+      user.profileImage = result.secure_url;
       await user.save();
       
       res.status(200).json({
@@ -162,12 +181,10 @@ class ProfileController {
         });
       }
       
-      // Delete image file from server
-      if (user.profileImage.startsWith('/uploads/profile')) {
-        const imagePath = path.join(__dirname, '..', user.profileImage);
-        if (fs.existsSync(imagePath)) {
-          fs.unlinkSync(imagePath);
-        }
+      // Delete image from Cloudinary
+      if (user.profileImage.includes('cloudinary')) {
+        const publicId = user.profileImage.split('/').slice(-2).join('/').split('.')[0];
+        await cloudinary.uploader.destroy(publicId);
       }
       
       // Remove profile image from user

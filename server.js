@@ -10,6 +10,9 @@ const propertyRoutes = require('./routes/propertyRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const adminPropertyRoutes = require('./routes/adminPropertyRoutes');
 const profileRoutes = require('./routes/profileRoutes');
+const serviceRoutes = require('./routes/serviceRoutes');
+const adminServiceRoutes = require('./routes/adminServiceRoutes');
+const userRoutes = require('./routes/userRoutes');
 
 // Initialize express
 const app = express();
@@ -18,7 +21,6 @@ const app = express();
 app.use(cors({
   origin: [
     'http://localhost:3000',  // Local frontend
-    'https://homely-theta.vercel.app/',
     'https://homely-theta.vercel.app',   // All Vercel deployments
     process.env.CLIENT_URL || 'http://localhost:3000'
   ],
@@ -75,6 +77,9 @@ app.use('/api/properties', propertyRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin-properties', adminPropertyRoutes);
 app.use('/api/profile', profileRoutes);
+app.use('/api/services', serviceRoutes);
+app.use('/api/admin-services', adminServiceRoutes);
+app.use('/api/users', userRoutes);
 
 // ========== ERROR HANDLING ==========
 // 404 handler
