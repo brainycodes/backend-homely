@@ -13,6 +13,7 @@ const profileRoutes = require('./routes/profileRoutes');
 const serviceRoutes = require('./routes/serviceRoutes');
 const adminServiceRoutes = require('./routes/adminServiceRoutes');
 const userRoutes = require('./routes/userRoutes');
+const savedRoutes = require('./routes/savedRoutes');
 
 // Initialize express
 const app = express();
@@ -80,6 +81,7 @@ app.use('/api/profile', profileRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/admin-services', adminServiceRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/saved', savedRoutes);
 
 // ========== ERROR HANDLING ==========
 // 404 handler

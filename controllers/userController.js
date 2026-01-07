@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const Property = require('../models/Property');
 const Service = require('../models/Service');
+const Saved = require('../models/Saved');
 const { validationResult } = require('express-validator');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
@@ -959,6 +960,140 @@ class UserController {
       });
     }
   }
+
+  // Update saveProperty method to use Saved model
+async saveProperty(req, res) {
+  try {
+    const userId = req.user.id;
+    const { propertyId } = req.body;
+
+    const property = await Property.findById(propertyId);
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        message: 'Property not found'
+      });
+    }
+
+    // Check if already saved using Saved model
+    const existingSave = await Saved.findOne({
+      user: userId,
+      itemType: 'property',
+      property: propertyId
+    });
+
+    let isSaved;
+    if (existingSave) {
+      // Remove from saved
+      await Saved.findByIdAndDelete(existingSave._id);
+      await Property.findByIdAndUpdate(propertyId, { $inc: { saves: -1 } });
+      isSaved = false;
+    } else {
+      // Add to saved
+      const savedItem = new Saved({
+        user: userId,
+        itemType: 'property',
+        property: propertyId
+      });
+      await savedItem.save();
+      await Property.findByIdAndUpdate(propertyId, { $inc: { saves: 1 } });
+      isSaved = true;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: isSaved ? 'Property saved successfully' : 'Property removed from saved',
+      isSaved
+    });
+
+  } catch (error) {
+    console.error('Save property error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error saving property',
+      error: error.message
+    });
+  }
+}
+
+// Update saveService method to use Saved model
+async saveService(req, res) {
+  try {
+    const userId = req.user.id;
+    const { serviceId } = req.body;
+
+    const service = await Service.findById(serviceId);
+    if (!service) {
+      return res.status(404).json({
+        success: false,
+        message: 'Service not found'
+      });
+    }
+
+    // Check if already saved using Saved model
+    const existingSave = await Saved.findOne({
+      user: userId,
+      itemType: 'service',
+      service: serviceId
+    });
+
+    let isSaved;
+    if (existingSave) {
+      // Remove from saved
+      await Saved.findByIdAndDelete(existingSave._id);
+      await Service.findByIdAndUpdate(serviceId, { $inc: { saves: -1 } });
+      isSaved = false;
+    } else {
+      // Add to saved
+      const savedItem = new Saved({
+        user: userId,
+        itemType: 'service',
+        service: serviceId
+      });
+      await savedItem.save();
+      await Service.findByIdAndUpdate(serviceId, { $inc: { saves: 1 } });
+      isSaved = true;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: isSaved ? 'Service saved successfully' : 'Service removed from saved',
+      isSaved
+    });
+
+  } catch (error) {
+    console.error('Save service error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error saving service',
+      error: error.message
+    });
+  }
+}
+
+// Update getSavedItems method to use Saved model
+async getSavedItems(req, res) {
+  try {
+    const userId = req.user.id;
+    
+    const result = await Saved.getUserSavedItems(userId, { limit: 12 });
+
+    res.status(200).json({
+      success: true,
+      savedProperties: result.items.filter(item => item.type === 'property'),
+      savedServices: result.items.filter(item => item.type === 'service'),
+      total: result.total
+    });
+
+  } catch (error) {
+    console.error('Get saved items error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching saved items',
+      error: error.message
+    });
+  }
+}
 }
 
 module.exports = new UserController();
