@@ -60,11 +60,6 @@ const userSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Service'
   }],
-  userType: {
-    type: String,
-    enum: ['buyer-renter', 'agent-landlord', 'service-provider', 'admin'],
-    default: 'buyer-renter'
-  },
   specialization: {
     type: String,
     trim: true

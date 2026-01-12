@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const mongoose = require('mongoose');
+const http = require('http');
 
 const authRoutes = require('./routes/authRoutes');
 const propertyRoutes = require('./routes/propertyRoutes');
@@ -14,6 +15,9 @@ const serviceRoutes = require('./routes/serviceRoutes');
 const adminServiceRoutes = require('./routes/adminServiceRoutes');
 const userRoutes = require('./routes/userRoutes');
 const savedRoutes = require('./routes/savedRoutes');
+const messageRoutes = require('./routes/messageRoutes');
+
+const { setupWebSocket } = require('./hooks/websocket');
 
 // Initialize express
 const app = express();
@@ -21,8 +25,8 @@ const app = express();
 // ========== MIDDLEWARE ==========
 app.use(cors({
   origin: [
-    'http://localhost:3000',  // Local frontend
-    'https://homely-theta.vercel.app',   // All Vercel deployments
+    'http://localhost:3000',
+    'https://homely-theta.vercel.app',
     process.env.CLIENT_URL || 'http://localhost:3000'
   ],
   credentials: true
@@ -37,11 +41,41 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // ========== DATABASE CONNECTION ==========
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGODB_URI);
+    // Increase timeout and retry options
+    const options = {
+      serverSelectionTimeoutMS: 5000, // 5 seconds
+      socketTimeoutMS: 45000, // 45 seconds
+      family: 4, // Use IPv4, skip trying IPv6
+      maxPoolSize: 10,
+      minPoolSize: 1,
+      retryWrites: true,
+      w: 'majority'
+    };
+
+    await mongoose.connect(process.env.MONGODB_URI, options);
     console.log('✅ MongoDB Connected');
+    
+    // Connection event listeners
+    mongoose.connection.on('connected', () => {
+      console.log('✅ MongoDB connection established');
+    });
+    
+    mongoose.connection.on('error', (err) => {
+      console.error('❌ MongoDB connection error:', err.message);
+    });
+    
+    mongoose.connection.on('disconnected', () => {
+      console.log('⚠️ MongoDB connection disconnected');
+    });
+    
     return true;
   } catch (error) {
     console.error('❌ MongoDB Connection Error:', error.message);
+    console.log('💡 Tips to fix MongoDB connection:');
+    console.log('1. Check if MongoDB is running locally: `mongod` or `brew services start mongodb-community`');
+    console.log('2. Check your MONGODB_URI in .env file');
+    console.log('3. For local development, use: mongodb://localhost:27017/homely');
+    console.log('4. Make sure MongoDB port 27017 is not blocked by firewall');
     return false;
   }
 };
@@ -49,9 +83,14 @@ const connectDB = async () => {
 // ========== ROUTES ==========
 // Basic routes
 app.get('/', (req, res) => {
+  const dbStatus = mongoose.connection.readyState;
+  const dbConnected = dbStatus === 1;
+  
   res.json({
     message: 'Welcome to Homely API',
     status: 'running',
+    database: dbConnected ? 'connected' : 'disconnected',
+    databaseStatus: dbStatus, // 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
     timestamp: new Date().toISOString(),
     version: '1.0.0'
   });
@@ -63,13 +102,17 @@ app.get('/health', async (req, res) => {
     status: 'success',
     message: 'Server is healthy',
     database: dbConnected ? 'connected' : 'disconnected',
+    databaseStatus: mongoose.connection.readyState,
     timestamp: new Date().toISOString(),
   });
 });
 
 // Test endpoint
 app.get('/test', (req, res) => {
-  res.json({ message: 'API is working!' });
+  res.json({ 
+    message: 'API is working!',
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+  });
 });
 
 // Import your actual routes
@@ -82,6 +125,7 @@ app.use('/api/services', serviceRoutes);
 app.use('/api/admin-services', adminServiceRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/saved', savedRoutes);
+app.use('/api/messages', messageRoutes);
 
 // ========== ERROR HANDLING ==========
 // 404 handler
@@ -101,21 +145,54 @@ app.use((err, req, res, next) => {
   });
 });
 
+const PORT = process.env.PORT || 5000;
 
-  // This means we're running: node server.js
-  const PORT = process.env.PORT || 5000;
-  
-  const startServer = async () => {
-    try {
-      await connectDB();
-      app.listen(PORT, () => {
-        console.log(`🚀 Server running on port ${PORT}`);
-        console.log(`📁 Environment: ${process.env.NODE_ENV || 'development'}`);
-      });
-    } catch (error) {
-      console.error('Failed to start server:', error);
-      process.exit(1);
+const startServer = async () => {
+  try {
+    // Try to connect to MongoDB
+    const dbConnected = await connectDB();
+    
+    if (!dbConnected) {
+      console.log('⚠️ Starting server without database connection...');
+      console.log('📋 Some features may not work until MongoDB is connected');
     }
-  };
+    
+    // Create HTTP server
+    const server = http.createServer(app);
+    
+    // Setup WebSocket (will handle MongoDB errors gracefully)
+    setupWebSocket(server);
+    
+    // Start the server
+    server.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📁 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🌐 Access the API at: http://localhost:${PORT}`);
+      console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+      
+      if (!dbConnected) {
+        console.log(`\n⚠️ IMPORTANT: MongoDB is not connected!`);
+        console.log(`Please check your MongoDB connection and restart the server.`);
+      }
+    });
+    
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+};
 
-  startServer();
+// Handle graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('\n🛑 Shutting down server...');
+  
+  // Close MongoDB connection
+  if (mongoose.connection.readyState === 1) {
+    await mongoose.connection.close();
+    console.log('✅ MongoDB connection closed');
+  }
+  
+  process.exit(0);
+});
+
+startServer();
