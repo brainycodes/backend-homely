@@ -47,6 +47,7 @@ router.get('/user/stats', propertyController.getPropertyStats);
 router.get('/user/activity', propertyController.getRecentActivity);
 router.get('/user/saved', propertyController.getSavedProperties);
 router.post('/:id/save', propertyController.toggleSaveProperty);
+router.get('/agent/:agentId', propertyController.getPropertiesByAgent);
 
 // Create property
 router.post(

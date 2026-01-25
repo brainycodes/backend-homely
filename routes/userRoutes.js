@@ -46,6 +46,10 @@ router.put('/change-password', changePasswordValidation, userController.changePa
 router.delete('/account', userController.deleteAccount);
 router.delete('/account/:id', userController.deleteAccount);
 
+// Add to user routes
+router.post('/:id/rate', userController.rateAgent);
+router.post('/save-user', userController.saveUser);
+
 // Admin only routes
 router.use(authMiddleware.restrictTo('admin'));
 

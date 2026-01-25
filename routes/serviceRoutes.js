@@ -46,6 +46,8 @@ router.post('/:id/save', serviceController.toggleSaveService);
 router.post('/:id/review', serviceController.addReview);
 router.post('/:id/book', serviceController.bookService);
 
+router.get('/agent/:agentId', serviceController.getServicesByAgent);
+
 // Create service
 router.post(
   '/',

@@ -1,6 +1,40 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
+// Define KYC Schema first
+const kycSchema = new mongoose.Schema({
+  status: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected', 'not_submitted'],
+    default: 'not_submitted'
+  },
+  submittedAt: Date,
+  reviewedAt: Date,
+  reviewedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  rejectionReason: String,
+  
+  // Document fields
+  identityType: {
+    type: String,
+    enum: ['national_id', 'passport', 'drivers_license', 'voters_card']
+  },
+  identityDocument: String,
+  identityDocumentBack: String,
+  proofOfAddress: String,
+  certificateOfIncorporation: String,
+  taxIdentificationNumber: String,
+  
+  // Personal information verification
+  verifiedName: String,
+  verifiedAddress: String,
+  verifiedDateOfBirth: Date,
+  verifiedIdentityNumber: String
+}, { _id: false });
+
+// Main User Schema
 const userSchema = new mongoose.Schema({
   firstName: {
     type: String,
@@ -102,26 +136,25 @@ const userSchema = new mongoose.Schema({
   emailVerificationSentAt: Date,
   profileImage: {
     type: String
+  },
+  // Add KYC field to the main schema
+  kyc: {
+    type: kycSchema,
+    default: () => ({})
   }
 }, {
   timestamps: true
 });
 
-// FIXED: Hash password before saving (Mongoose 6+ style)
+// Hash password before saving
 userSchema.pre('save', async function() {
   try {
-    // Only hash the password if it has been modified (or is new)
     if (!this.isModified('password')) {
       return;
     }
     
-    // Generate salt
     const salt = await bcrypt.genSalt(10);
-    
-    // Hash password with salt
     const hashedPassword = await bcrypt.hash(this.password, salt);
-    
-    // Replace plain password with hashed password
     this.password = hashedPassword;
     
   } catch (error) {

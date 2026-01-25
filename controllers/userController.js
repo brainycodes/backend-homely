@@ -47,7 +47,7 @@ class UserController {
             verifiedUsers: { $sum: { $cond: [{ $eq: ["$emailVerified", true] }, 1, 0] } },
             adminUsers: { $sum: { $cond: [{ $eq: ["$userType", "admin"] }, 1, 0] } },
             agentLandlordUsers: { $sum: { $cond: [{ $eq: ["$userType", "agent-landlord"] }, 1, 0] } },
-            serviceProviderUsers: { $sum: { $cond: [{ $eq: ["$userType", "service-provider"] }, 1, 0] } },
+            serviceProviderUsers: { $sum: { $cond: [{ $eq: ["$userType", "house-seeker"] }, 1, 0] } },
             buyerRenterUsers: { $sum: { $cond: [{ $eq: ["$userType", "buyer-renter"] }, 1, 0] } }
           }
         }
@@ -105,9 +105,9 @@ class UserController {
           .lean();
       }
       
-      // Get user's services if service-provider
+      // Get user's services if house-seeker
       let services = [];
-      if (user.userType === 'service-provider') {
+      if (user.userType === 'house-seeker') {
         services = await Service.find({ postedBy: userId })
           .select('title price location category featured isVerified images')
           .limit(6)
@@ -153,7 +153,7 @@ class UserController {
         };
       }
       
-      if (user.userType === 'service-provider') {
+      if (user.userType === 'house-seeker') {
         const serviceStats = await Service.aggregate([
           { $match: { postedBy: new mongoose.Types.ObjectId(userId) } },
           {
@@ -362,8 +362,8 @@ class UserController {
         await Property.deleteMany({ postedBy: userId });
       }
       
-      // Delete user's services if service-provider
-      if (user.userType === 'service-provider') {
+      // Delete user's services if house-seeker
+      if (user.userType === 'house-seeker') {
         await Service.deleteMany({ postedBy: userId });
       }
       
@@ -382,34 +382,37 @@ class UserController {
     }
   }
   
-  // Get all agents (agent-landlord and service-provider)
+  // In userController.js, update the getAllAgents function:
   async getAllAgents(req, res) {
     try {
+      console.log('Getting all agents with query:', req.query); // Debug log
+      
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 12;
       const skip = (page - 1) * limit;
       
       const filters = req.query;
       const query = {
-        $or: [
-          { userType: 'agent-landlord' },
-          { userType: 'service-provider' }
-        ],
         isActive: true
       };
       
-      // Apply filters
-      if (filters.userType && filters.userType !== 'all') {
-        query.$or = [{ userType: filters.userType }];
+      // Apply userType filter - FIXED
+      if (filters.userType) {
+        if (filters.userType.includes(',')) {
+          // Multiple user types (e.g., "agent-landlord,house-seeker")
+          const userTypes = filters.userType.split(',');
+          query.userType = { $in: userTypes };
+        } else {
+          // Single user type
+          query.userType = filters.userType;
+        }
+      } else {
+        // Default: get both agent-landlord and house-seeker
+        query.userType = { $in: ['agent-landlord', 'house-seeker'] };
       }
       
       if (filters.specialization) {
         query.specialization = { $regex: filters.specialization, $options: 'i' };
-      }
-      
-      if (filters.location) {
-        // This would need a more complex query if location is stored
-        // For now, we'll handle it in the client
       }
       
       if (filters.search) {
@@ -420,16 +423,20 @@ class UserController {
         ];
       }
       
+      console.log('Final query:', query); // Debug log
+      
       // Get total count
       const total = await User.countDocuments(query);
       
-      // Get agents with stats
+      // Get agents
       const agents = await User.find(query)
         .select('-password -__v')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean();
+      
+      console.log('Found agents:', agents.length); // Debug log
       
       // Get stats for each agent
       const agentsWithStats = await Promise.all(
@@ -458,7 +465,7 @@ class UserController {
             };
           }
           
-          if (agent.userType === 'service-provider') {
+          if (agent.userType === 'house-seeker') {
             const serviceStats = await Service.aggregate([
               { $match: { postedBy: new mongoose.Types.ObjectId(agent._id) } },
               {
@@ -482,7 +489,7 @@ class UserController {
             };
           }
           
-          // Calculate average rating from properties/services
+          // Calculate average rating
           let rating = 4.5; // Default
           if (agent.userType === 'agent-landlord') {
             const propertyRating = await Property.aggregate([
@@ -495,7 +502,7 @@ class UserController {
             }
           }
           
-          if (agent.userType === 'service-provider') {
+          if (agent.userType === 'house-seeker') {
             const serviceRating = await Service.aggregate([
               { $match: { postedBy: new mongoose.Types.ObjectId(agent._id) } },
               { $group: { _id: null, avgRating: { $avg: "$rating" } } }
@@ -547,34 +554,51 @@ class UserController {
       }
       
       // Check if user is an agent
-      if (!['agent-landlord', 'service-provider'].includes(agent.userType)) {
+      if (!['agent-landlord', 'house-seeker'].includes(agent.userType)) {
         return res.status(400).json({
           success: false,
           message: 'User is not an agent'
         });
       }
       
-      // Get agent's properties or services
-      let listings = [];
-      if (agent.userType === 'agent-landlord') {
-        listings = await Property.find({ postedBy: agent._id })
-          .select('title price location type status featured isVerified images rating views saves')
-          .sort({ featured: -1, createdAt: -1 })
-          .limit(10)
-          .lean();
-      } else if (agent.userType === 'service-provider') {
-        listings = await Service.find({ postedBy: agent._id })
-          .select('title price location category featured isVerified images rating views saves completedJobs')
-          .sort({ featured: -1, createdAt: -1 })
-          .limit(10)
-          .lean();
-      }
+      // Get agent's properties (check both postedBy and agent.id)
+      const propertyQuery = {
+        $or: [
+          { postedBy: agent._id },
+          { 'agent.id': agent._id }
+        ],
+        isActive: true,
+        isVerified: true
+      };
+      
+      const properties = await Property.find(propertyQuery)
+        .select('title price location type status featured isVerified images rating views saves bedrooms bathrooms area')
+        .sort({ featured: -1, createdAt: -1 })
+        .limit(10)
+        .lean();
+      
+      // Get agent's services (check both postedBy and provider.id)
+      const serviceQuery = {
+        $or: [
+          { postedBy: agent._id },
+          { 'provider.id': agent._id }
+        ],
+        isActive: true,
+        isVerified: true
+      };
+      
+      const services = await Service.find(serviceQuery)
+        .select('title price location category featured isVerified images rating views saves completedJobs experienceLevel pricingType insurance')
+        .sort({ featured: -1, createdAt: -1 })
+        .limit(10)
+        .lean();
       
       // Get agent stats
       let stats = {};
+      
       if (agent.userType === 'agent-landlord') {
         const propertyStats = await Property.aggregate([
-          { $match: { postedBy: new mongoose.Types.ObjectId(agent._id) } },
+          { $match: propertyQuery },
           {
             $group: {
               _id: null,
@@ -598,9 +622,9 @@ class UserController {
         };
       }
       
-      if (agent.userType === 'service-provider') {
+      if (agent.userType === 'house-seeker') {
         const serviceStats = await Service.aggregate([
-          { $match: { postedBy: new mongoose.Types.ObjectId(agent._id) } },
+          { $match: serviceQuery },
           {
             $group: {
               _id: null,
@@ -626,16 +650,30 @@ class UserController {
         };
       }
       
-      // Calculate rating
-      const rating = stats.avgRating ? parseFloat(stats.avgRating.toFixed(1)) : 4.5;
+      // Calculate combined rating
+      const allRatings = [
+        ...(properties.map(p => p.rating || 0)),
+        ...(services.map(s => s.rating || 0))
+      ].filter(r => r > 0);
+      
+      const avgRating = allRatings.length > 0 
+        ? allRatings.reduce((a, b) => a + b, 0) / allRatings.length 
+        : 4.5;
       
       res.status(200).json({
         success: true,
         agent: {
           ...agent,
-          listings,
-          stats,
-          rating
+          properties,
+          services,
+          stats: {
+            ...stats,
+            propertiesPosted: properties.length,
+            servicesPosted: services.length,
+            totalViews: (stats.totalViews || 0) + (stats.totalViews || 0),
+            totalSaves: (stats.totalSaves || 0) + (stats.totalSaves || 0)
+          },
+          rating: parseFloat(avgRating.toFixed(1))
         }
       });
       
@@ -879,7 +917,7 @@ class UserController {
         };
       }
 
-      if (user.userType === 'service-provider') {
+      if (user.userType === 'house-seeker') {
         // Service provider stats
         const serviceStats = await Service.aggregate([
           { $match: { postedBy: new mongoose.Types.ObjectId(userId) } },
@@ -1090,6 +1128,113 @@ async getSavedItems(req, res) {
     res.status(500).json({
       success: false,
       message: 'Error fetching saved items',
+      error: error.message
+    });
+  }
+}
+
+// Add to userController.js
+async rateAgent(req, res) {
+  try {
+    const { rating } = req.body;
+    const { id: agentId } = req.params;
+    const userId = req.user.id;
+
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(400).json({
+        success: false,
+        message: 'Rating must be between 1 and 5'
+      });
+    }
+
+    const agent = await User.findById(agentId);
+    if (!agent) {
+      return res.status(404).json({
+        success: false,
+        message: 'Agent not found'
+      });
+    }
+
+    // Check if user is trying to rate themselves
+    if (agentId === userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot rate yourself'
+      });
+    }
+
+    // Create a Rating model would be better, but for simplicity:
+    // We'll update agent's average rating
+    const newRating = (agent.rating || 0) + rating;
+    agent.rating = newRating / 2; // Simplified average
+    await agent.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Rating submitted successfully',
+      rating: agent.rating
+    });
+
+  } catch (error) {
+    console.error('Rate agent error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error submitting rating',
+      error: error.message
+    });
+  }
+}
+
+// Add endpoint for saving users
+async saveUser(req, res) {
+  try {
+    const { userId, notes } = req.body;
+    const currentUserId = req.user.id;
+
+    const userToSave = await User.findById(userId);
+    if (!userToSave) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Check if already saved
+    const existingSave = await Saved.findOne({
+      user: currentUserId,
+      itemType: 'user',
+      userSaved: userId
+    });
+
+    if (existingSave) {
+      return res.status(400).json({
+        success: false,
+        message: 'User is already saved'
+      });
+    }
+
+    // Create saved item
+    const savedItem = new Saved({
+      user: currentUserId,
+      itemType: 'user',
+      userSaved: userId,
+      notes: notes || '',
+      savedAt: new Date()
+    });
+
+    await savedItem.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'User saved successfully',
+      savedItem
+    });
+
+  } catch (error) {
+    console.error('Save user error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error saving user',
       error: error.message
     });
   }

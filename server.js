@@ -16,6 +16,8 @@ const adminServiceRoutes = require('./routes/adminServiceRoutes');
 const userRoutes = require('./routes/userRoutes');
 const savedRoutes = require('./routes/savedRoutes');
 const messageRoutes = require('./routes/messageRoutes');
+const savedSearchesRoutes = require('./routes/savedSearchesRoutes');
+const bookingRoutes = require('./routes/bookingRoutes');
 
 const { setupWebSocket } = require('./hooks/websocket');
 
@@ -126,6 +128,8 @@ app.use('/api/admin-services', adminServiceRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/saved', savedRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/saved-searches', savedSearchesRoutes);
+app.use('/api/bookings', bookingRoutes);
 
 // ========== ERROR HANDLING ==========
 // 404 handler

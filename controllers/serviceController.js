@@ -21,7 +21,7 @@ class ServiceController {
       const user = await User.findById(userId);
       
       // Check if user is agent-landlord or service provider
-      if (user.userType !== 'agent-landlord' && user.userType !== 'service-provider') {
+      if (user.userType !== 'agent-landlord' && user.userType !== 'house-seeker') {
         return res.status(403).json({
           success: false,
           message: 'Only agents, landlords, and service providers can create services'
@@ -1246,48 +1246,45 @@ class ServiceController {
     }
   }
   
-  // Test endpoint for debugging
-  async testServiceData(req, res) {
+  async getServicesByAgent(req, res) {
     try {
-      const service = await Service.findById(req.params.id)
+      const { agentId } = req.params;
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 12;
+      const skip = (page - 1) * limit;
+
+      // Find services where postedBy OR provider.id matches agentId
+      const query = {
+        $or: [
+          { postedBy: agentId },
+          { 'provider.id': agentId }
+        ],
+        isActive: true,
+        isVerified: true
+      };
+
+      const total = await Service.countDocuments(query);
+      
+      const services = await Service.find(query)
         .populate('postedBy', 'firstName lastName email phone userType profileImage')
         .populate('provider.id', 'firstName lastName email phone profileImage')
-        .lean();
-      
-      if (!service) {
-        return res.status(404).json({
-          success: false,
-          message: 'Service not found'
-        });
-      }
-      
-      // Log the structure for debugging
-      console.log('Service postedBy structure:', JSON.stringify(service.postedBy, null, 2));
-      console.log('Service provider structure:', JSON.stringify(service.provider, null, 2));
-      console.log('Service provider.id structure:', JSON.stringify(service.provider?.id, null, 2));
-      
+        .sort({ featured: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit);
+
       res.status(200).json({
         success: true,
-        service,
-        debug: {
-          postedByHasProfileImage: !!service.postedBy?.profileImage,
-          providerHasProfileImage: !!service.provider?.profileImage,
-          providerHasAvatar: !!service.provider?.avatar,
-          providerIdHasProfileImage: !!service.provider?.id?.profileImage,
-          postedByFields: Object.keys(service.postedBy || {}),
-          providerFields: Object.keys(service.provider || {}),
-          postedByProfileImageValue: service.postedBy?.profileImage,
-          providerProfileImageValue: service.provider?.profileImage,
-          providerAvatarValue: service.provider?.avatar,
-          providerIdProfileImageValue: service.provider?.id?.profileImage
-        }
+        services,
+        total,
+        pages: Math.ceil(total / limit),
+        currentPage: page
       });
-      
+
     } catch (error) {
-      console.error('Test service data error:', error);
+      console.error('Get services by agent error:', error);
       res.status(500).json({
         success: false,
-        message: 'Error testing service data',
+        message: 'Error fetching agent services',
         error: error.message
       });
     }

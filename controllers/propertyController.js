@@ -959,41 +959,45 @@ class PropertyController {
     }
   }
   
-  // Test endpoint for debugging
-  async testPropertyData(req, res) {
+  // In propertyController.js
+  async getPropertiesByAgent(req, res) {
     try {
-      const property = await Property.findById(req.params.id)
+      const { agentId } = req.params;
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 12;
+      const skip = (page - 1) * limit;
+
+      // Find properties where postedBy OR agent.id matches agentId
+      const query = {
+        $or: [
+          { postedBy: agentId },
+          { 'agent.id': agentId }
+        ],
+        isActive: true,
+        isVerified: true
+      };
+
+      const total = await Property.countDocuments(query);
+      
+      const properties = await Property.find(query)
         .populate('postedBy', 'firstName lastName email phone userType profileImage')
-        .lean();
-      
-      if (!property) {
-        return res.status(404).json({
-          success: false,
-          message: 'Property not found'
-        });
-      }
-      
-      // Log the structure for debugging
-      console.log('Property postedBy structure:', JSON.stringify(property.postedBy, null, 2));
-      
+        .sort({ featured: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit);
+
       res.status(200).json({
         success: true,
-        property,
-        debug: {
-          postedByHasProfileImage: !!property.postedBy?.profileImage,
-          postedByFields: Object.keys(property.postedBy || {}),
-          postedByProfileImageValue: property.postedBy?.profileImage,
-          propertyAgentFields: Object.keys(property.agent || {}),
-          propertyAgentAvatar: property.agent?.avatar,
-          propertyAgentProfileImage: property.agent?.profileImage
-        }
+        properties,
+        total,
+        pages: Math.ceil(total / limit),
+        currentPage: page
       });
-      
+
     } catch (error) {
-      console.error('Test property data error:', error);
+      console.error('Get properties by agent error:', error);
       res.status(500).json({
         success: false,
-        message: 'Error testing property data',
+        message: 'Error fetching agent properties',
         error: error.message
       });
     }

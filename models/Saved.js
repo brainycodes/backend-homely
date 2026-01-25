@@ -9,7 +9,7 @@ const savedSchema = new mongoose.Schema({
   itemType: {
     type: String,
     required: true,
-    enum: ['property', 'service']
+    enum: ['property', 'service', 'user']
   },
   property: {
     type: mongoose.Schema.Types.ObjectId,
@@ -20,6 +20,11 @@ const savedSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Service',
     required: function() { return this.itemType === 'service'; }
+  },
+  userSaved: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: function() { return this.itemType === 'user'; }
   },
   notes: {
     type: String,
@@ -38,7 +43,11 @@ const savedSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Compound index to ensure unique combination of user and item
+// Add index for userSaved
+savedSchema.index({ user: 1, userSaved: 1 }, { 
+  unique: true, 
+  partialFilterExpression: { itemType: 'user' } 
+});
 savedSchema.index({ user: 1, property: 1 }, { 
   unique: true, 
   partialFilterExpression: { itemType: 'property' } 

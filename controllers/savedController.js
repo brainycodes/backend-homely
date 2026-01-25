@@ -13,10 +13,10 @@ class SavedController {
       const userId = req.user.id;
 
       // Validate item type
-      if (!['property', 'service'].includes(itemType)) {
+      if (!['property', 'service', 'user'].includes(itemType)) {
         return res.status(400).json({
           success: false,
-          message: 'Invalid item type. Must be "property" or "service"'
+          message: 'Invalid item type. Must be "property", "service", or "user"'
         });
       }
 
@@ -30,12 +30,20 @@ class SavedController {
             message: 'Property not found'
           });
         }
-      } else {
+      } else if (itemType === 'service') {
         item = await Service.findById(itemId);
         if (!item) {
           return res.status(404).json({
             success: false,
             message: 'Service not found'
+          });
+        }
+      } else if (itemType === 'user') {
+        item = await User.findById(itemId);
+        if (!item) {
+          return res.status(404).json({
+            success: false,
+            message: 'User not found'
           });
         }
       }
@@ -44,7 +52,7 @@ class SavedController {
       const existingSave = await Saved.findOne({
         user: userId,
         itemType,
-        [itemType]: itemId
+        [itemType === 'user' ? 'userSaved' : itemType]: itemId
       });
 
       if (existingSave) {
@@ -58,18 +66,26 @@ class SavedController {
       const savedData = {
         user: userId,
         itemType,
-        [itemType]: itemId,
         notes: notes || '',
         tags: tags ? (Array.isArray(tags) ? tags : tags.split(',').map(tag => tag.trim())) : []
       };
 
+      // Set the appropriate field based on itemType
+      if (itemType === 'property') {
+        savedData.property = itemId;
+      } else if (itemType === 'service') {
+        savedData.service = itemId;
+      } else if (itemType === 'user') {
+        savedData.userSaved = itemId;
+      }
+
       const savedItem = new Saved(savedData);
       await savedItem.save();
 
-      // Increment saves count on the item
+      // Increment saves count on the item (not for users)
       if (itemType === 'property') {
         await Property.findByIdAndUpdate(itemId, { $inc: { saves: 1 } });
-      } else {
+      } else if (itemType === 'service') {
         await Service.findByIdAndUpdate(itemId, { $inc: { saves: 1 } });
       }
 
@@ -574,6 +590,38 @@ class SavedController {
       });
     }
   }
+  // Check if user is saved
+async checkIfUserSaved(req, res) {
+  try {
+    const { userId } = req.params;
+    const currentUserId = req.user.id;
+
+    const savedItem = await Saved.findOne({
+      user: currentUserId,
+      itemType: 'user',
+      userSaved: userId
+    });
+
+    res.status(200).json({
+      success: true,
+      isSaved: !!savedItem,
+      savedItem: savedItem ? {
+        id: savedItem._id,
+        savedAt: savedItem.savedAt,
+        notes: savedItem.notes,
+        tags: savedItem.tags
+      } : null
+    });
+
+  } catch (error) {
+    console.error('Check if user saved error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error checking saved status',
+      error: error.message
+    });
+  }
+}
 }
 
 module.exports = new SavedController();

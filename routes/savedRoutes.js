@@ -44,6 +44,8 @@ router.put('/:id', updateSavedValidation, savedController.updateSavedItem);
 // Remove saved item
 router.delete('/:id', savedController.removeSavedItem);
 
+router.get('/check/user/:userId', savedController.checkIfUserSaved);
+
 // Clear all saved items
 router.delete('/', savedController.clearAllSavedItems);
 
