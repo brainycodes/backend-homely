@@ -71,6 +71,19 @@ const userSchema = new mongoose.Schema({
     default: 'house-seeker',
     required: true
   },
+  
+  // Add rating fields here
+  rating: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 5
+  },
+  totalRatings: {
+    type: Number,
+    default: 0
+  },
+  
   agreeToTerms: {
     type: Boolean,
     required: [true, 'You must agree to terms and conditions'],

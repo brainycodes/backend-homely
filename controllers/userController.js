@@ -2,6 +2,7 @@ const User = require('../models/User');
 const Property = require('../models/Property');
 const Service = require('../models/Service');
 const Saved = require('../models/Saved');
+const Rating = require('../models/Rating'); // Add this import
 const { validationResult } = require('express-validator');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
@@ -381,11 +382,45 @@ class UserController {
       });
     }
   }
+
+  // Add deleteRating method
+  async deleteRating(req, res) {
+    try {
+      const { id: agentId } = req.params;
+      const userId = req.user.id;
+
+      // Find and delete the rating
+      const rating = await Rating.findOneAndDelete({
+        user: userId,
+        ratedUser: agentId
+      });
+
+      if (!rating) {
+        return res.status(404).json({
+          success: false,
+          message: 'Rating not found'
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Rating deleted successfully'
+      });
+
+    } catch (error) {
+      console.error('Delete rating error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error deleting rating',
+        error: error.message
+      });
+    }
+  }
   
-  // In userController.js, update the getAllAgents function:
+// Update getAllAgents to include ratings
   async getAllAgents(req, res) {
     try {
-      console.log('Getting all agents with query:', req.query); // Debug log
+      console.log('Getting all agents with query:', req.query);
       
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 12;
@@ -396,14 +431,12 @@ class UserController {
         isActive: true
       };
       
-      // Apply userType filter - FIXED
+      // Apply userType filter
       if (filters.userType) {
         if (filters.userType.includes(',')) {
-          // Multiple user types (e.g., "agent-landlord,house-seeker")
           const userTypes = filters.userType.split(',');
           query.userType = { $in: userTypes };
         } else {
-          // Single user type
           query.userType = filters.userType;
         }
       } else {
@@ -423,20 +456,34 @@ class UserController {
         ];
       }
       
-      console.log('Final query:', query); // Debug log
+      // Filter by minimum rating if specified
+      if (filters.minRating) {
+        query.rating = { $gte: parseFloat(filters.minRating) };
+      }
+      
+      console.log('Final query:', query);
       
       // Get total count
       const total = await User.countDocuments(query);
       
-      // Get agents
+      // Get agents with sorting
+      let sortCriteria = { createdAt: -1 };
+      if (filters.sortBy === 'rating') {
+        sortCriteria = { rating: -1, createdAt: -1 };
+      } else if (filters.sortBy === 'newest') {
+        sortCriteria = { createdAt: -1 };
+      } else if (filters.sortBy === 'name') {
+        sortCriteria = { firstName: 1, lastName: 1 };
+      }
+      
       const agents = await User.find(query)
         .select('-password -__v')
-        .sort({ createdAt: -1 })
+        .sort(sortCriteria)
         .skip(skip)
         .limit(limit)
         .lean();
       
-      console.log('Found agents:', agents.length); // Debug log
+      console.log('Found agents:', agents.length);
       
       // Get stats for each agent
       const agentsWithStats = await Promise.all(
@@ -489,34 +536,12 @@ class UserController {
             };
           }
           
-          // Calculate average rating
-          let rating = 4.5; // Default
-          if (agent.userType === 'agent-landlord') {
-            const propertyRating = await Property.aggregate([
-              { $match: { postedBy: new mongoose.Types.ObjectId(agent._id) } },
-              { $group: { _id: null, avgRating: { $avg: "$rating" } } }
-            ]);
-            
-            if (propertyRating[0] && propertyRating[0].avgRating) {
-              rating = propertyRating[0].avgRating;
-            }
-          }
-          
-          if (agent.userType === 'house-seeker') {
-            const serviceRating = await Service.aggregate([
-              { $match: { postedBy: new mongoose.Types.ObjectId(agent._id) } },
-              { $group: { _id: null, avgRating: { $avg: "$rating" } } }
-            ]);
-            
-            if (serviceRating[0] && serviceRating[0].avgRating) {
-              rating = serviceRating[0].avgRating;
-            }
-          }
-          
           return {
             ...agent,
             stats,
-            rating: parseFloat(rating.toFixed(1))
+            // Use the rating from the user document
+            rating: agent.rating || 0,
+            totalRatings: agent.totalRatings || 0
           };
         })
       );
@@ -539,7 +564,159 @@ class UserController {
     }
   }
   
-  // Get agent profile by ID
+// Enhanced getAgentReviews method
+  async getAgentReviews(req, res) {
+    try {
+      const { id: agentId } = req.params;
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 10;
+      const skip = (page - 1) * limit;
+      
+      const ratingFilter = req.query.rating || 'all';
+      const sortBy = req.query.sortBy || 'newest';
+      
+      // Check if agent exists
+      const agent = await User.findById(agentId);
+      if (!agent) {
+        return res.status(404).json({
+          success: false,
+          message: 'Agent not found'
+        });
+      }
+      
+      // Build query
+      const query = { ratedUser: agentId };
+      
+      // Apply rating filter
+      if (ratingFilter !== 'all') {
+        const rating = parseInt(ratingFilter);
+        if (rating === 5) {
+          query.rating = 5;
+        } else if (rating >= 1 && rating <= 4) {
+          query.rating = { $gte: rating };
+        }
+      }
+      
+      // Build sort
+      let sort = { createdAt: -1 }; // Default: newest first
+      
+      switch (sortBy) {
+        case 'oldest':
+          sort = { createdAt: 1 };
+          break;
+        case 'highest':
+          sort = { rating: -1, createdAt: -1 };
+          break;
+        case 'lowest':
+          sort = { rating: 1, createdAt: -1 };
+          break;
+        case 'most_helpful':
+          // Assuming we have a likes field
+          sort = { likes: -1, createdAt: -1 };
+          break;
+      }
+      
+      // Get reviews with pagination
+      const reviews = await Rating.find(query)
+        .populate('user', 'firstName lastName profileImage emailVerified')
+        .sort(sort)
+        .skip(skip)
+        .limit(limit)
+        .lean();
+      
+      // Get total count
+      const total = await Rating.countDocuments(query);
+      
+      // Get average rating and distribution
+      const ratingStats = await Rating.aggregate([
+        { $match: { ratedUser: new mongoose.Types.ObjectId(agentId) } },
+        {
+          $group: {
+            _id: null,
+            averageRating: { $avg: '$rating' },
+            totalRatings: { $sum: 1 },
+            ratingDistribution: {
+              $push: '$rating'
+            }
+          }
+        }
+      ]);
+      
+      // Calculate distribution
+      const distribution = {
+        5: 0,
+        4: 0,
+        3: 0,
+        2: 0,
+        1: 0
+      };
+      
+      if (ratingStats.length > 0 && ratingStats[0].ratingDistribution) {
+        ratingStats[0].ratingDistribution.forEach(rating => {
+          if (rating >= 1 && rating <= 5) {
+            const star = Math.floor(rating);
+            distribution[star] = (distribution[star] || 0) + 1;
+          }
+        });
+      }
+      
+      const averageRating = ratingStats.length > 0 
+        ? ratingStats[0].averageRating || 0 
+        : 0;
+      
+      res.status(200).json({
+        success: true,
+        reviews,
+        total,
+        pages: Math.ceil(total / limit),
+        currentPage: page,
+        averageRating: parseFloat(averageRating.toFixed(1)),
+        totalRatings: ratingStats.length > 0 ? ratingStats[0].totalRatings || 0 : 0,
+        ratingDistribution: distribution
+      });
+      
+    } catch (error) {
+      console.error('Get agent reviews error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching reviews',
+        error: error.message
+      });
+    }
+  }
+
+  // Add a method to get user's rating for an agent
+  async getUserRating(req, res) {
+    try {
+      const { id: agentId } = req.params;
+      const userId = req.user.id;
+      
+      const rating = await Rating.findOne({
+        user: userId,
+        ratedUser: agentId
+      });
+      
+      res.status(200).json({
+        success: true,
+        rating: rating ? {
+          rating: rating.rating,
+          review: rating.review,
+          createdAt: rating.createdAt
+        } : null
+      });
+      
+    } catch (error) {
+      console.error('Get user rating error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching user rating',
+        error: error.message
+      });
+    }
+  }
+
+
+// Update getAgentById to include ratings
   async getAgentById(req, res) {
     try {
       const agent = await User.findById(req.params.id)
@@ -650,15 +827,60 @@ class UserController {
         };
       }
       
-      // Calculate combined rating
+      // Calculate combined rating from properties and services
       const allRatings = [
         ...(properties.map(p => p.rating || 0)),
         ...(services.map(s => s.rating || 0))
       ].filter(r => r > 0);
       
-      const avgRating = allRatings.length > 0 
-        ? allRatings.reduce((a, b) => a + b, 0) / allRatings.length 
-        : 4.5;
+      // Get user's rating if logged in
+      let userRating = null;
+      if (req.user) {
+        const rating = await Rating.findOne({
+          user: req.user.id,
+          ratedUser: agent._id
+        });
+        
+        if (rating) {
+          userRating = {
+            rating: rating.rating,
+            review: rating.review,
+            createdAt: rating.createdAt
+          };
+        }
+      }
+      
+      // Get recent reviews
+      const recentReviews = await Rating.find({ ratedUser: agent._id })
+        .populate('user', 'firstName lastName profileImage')
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .lean();
+      
+      // Get rating distribution
+      const ratingDistribution = await Rating.aggregate([
+        { $match: { ratedUser: agent._id } },
+        {
+          $group: {
+            _id: '$rating',
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { _id: -1 } }
+      ]);
+      
+      // Create rating distribution object
+      const distribution = {
+        5: 0,
+        4: 0,
+        3: 0,
+        2: 0,
+        1: 0
+      };
+      
+      ratingDistribution.forEach(item => {
+        distribution[item._id] = item.count;
+      });
       
       res.status(200).json({
         success: true,
@@ -671,9 +893,13 @@ class UserController {
             propertiesPosted: properties.length,
             servicesPosted: services.length,
             totalViews: (stats.totalViews || 0) + (stats.totalViews || 0),
-            totalSaves: (stats.totalSaves || 0) + (stats.totalSaves || 0)
+            totalSaves: (stats.totalSaves || 0) + (stats.totalSaves || 0),
+            totalRatings: agent.totalRatings || 0
           },
-          rating: parseFloat(avgRating.toFixed(1))
+          rating: agent.rating || 0,
+          userRating, // Add current user's rating
+          recentReviews, // Add recent reviews
+          ratingDistribution: distribution // Add rating distribution
         }
       });
       
@@ -686,6 +912,7 @@ class UserController {
       });
     }
   }
+
   
   // Toggle user active status (admin only)
   async toggleActiveStatus(req, res) {
@@ -1133,57 +1360,101 @@ async getSavedItems(req, res) {
   }
 }
 
-// Add to userController.js
-async rateAgent(req, res) {
-  try {
-    const { rating } = req.body;
-    const { id: agentId } = req.params;
-    const userId = req.user.id;
+// Update the rateAgent method
+  async rateAgent(req, res) {
+    try {
+      const { rating, review } = req.body;
+      const { id: agentId } = req.params;
+      const userId = req.user.id;
 
-    if (!rating || rating < 1 || rating > 5) {
-      return res.status(400).json({
+      // Validation
+      if (!rating || rating < 1 || rating > 5) {
+        return res.status(400).json({
+          success: false,
+          message: 'Rating must be between 1 and 5'
+        });
+      }
+
+      const agent = await User.findById(agentId);
+      if (!agent) {
+        return res.status(404).json({
+          success: false,
+          message: 'Agent not found'
+        });
+      }
+
+      // Check if user is trying to rate themselves
+      if (agentId === userId) {
+        return res.status(400).json({
+          success: false,
+          message: 'You cannot rate yourself'
+        });
+      }
+
+      // Check if user already rated this agent
+      const existingRating = await Rating.findOne({
+        user: userId,
+        ratedUser: agentId
+      });
+
+      if (existingRating) {
+        // Update existing rating
+        existingRating.rating = rating;
+        existingRating.review = review || existingRating.review;
+        await existingRating.save();
+        
+        const message = review ? 'Rating and review updated successfully' : 'Rating updated successfully';
+        
+        // Get updated agent data
+        const updatedAgent = await User.findById(agentId);
+        
+        return res.status(200).json({
+          success: true,
+          message,
+          rating: updatedAgent.rating,
+          totalRatings: updatedAgent.totalRatings
+        });
+      }
+
+      // Create new rating
+      const newRating = new Rating({
+        user: userId,
+        ratedUser: agentId,
+        rating,
+        review: review || ''
+      });
+
+      await newRating.save();
+
+      // Get updated agent data
+      const updatedAgent = await User.findById(agentId);
+
+      res.status(201).json({
+        success: true,
+        message: 'Rating submitted successfully',
+        rating: updatedAgent.rating,
+        totalRatings: updatedAgent.totalRatings
+      });
+
+    } catch (error) {
+      console.error('Rate agent error:', error);
+      
+      // Handle duplicate rating error
+      if (error.code === 11000) {
+        return res.status(400).json({
+          success: false,
+          message: 'You have already rated this agent'
+        });
+      }
+      
+      res.status(500).json({
         success: false,
-        message: 'Rating must be between 1 and 5'
+        message: 'Error submitting rating',
+        error: error.message
       });
     }
-
-    const agent = await User.findById(agentId);
-    if (!agent) {
-      return res.status(404).json({
-        success: false,
-        message: 'Agent not found'
-      });
-    }
-
-    // Check if user is trying to rate themselves
-    if (agentId === userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'You cannot rate yourself'
-      });
-    }
-
-    // Create a Rating model would be better, but for simplicity:
-    // We'll update agent's average rating
-    const newRating = (agent.rating || 0) + rating;
-    agent.rating = newRating / 2; // Simplified average
-    await agent.save();
-
-    res.status(200).json({
-      success: true,
-      message: 'Rating submitted successfully',
-      rating: agent.rating
-    });
-
-  } catch (error) {
-    console.error('Rate agent error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error submitting rating',
-      error: error.message
-    });
   }
-}
+
 
 // Add endpoint for saving users
 async saveUser(req, res) {

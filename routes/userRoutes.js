@@ -30,9 +30,16 @@ const changePasswordValidation = [
   })
 ];
 
+const ratingValidation = [
+  check('rating', 'Rating is required').notEmpty(),
+  check('rating', 'Rating must be between 1 and 5').isInt({ min: 1, max: 5 }),
+  check('review', 'Review must be less than 500 characters').optional().isLength({ max: 500 })
+];
+
 // Public routes
 router.get('/agents', userController.getAllAgents);
 router.get('/agents/:id', userController.getAgentById);
+router.get('/agents/:id/reviews', userController.getAgentReviews);
 
 // Protected routes (require authentication)
 router.use(authMiddleware.protect);
@@ -46,8 +53,13 @@ router.put('/change-password', changePasswordValidation, userController.changePa
 router.delete('/account', userController.deleteAccount);
 router.delete('/account/:id', userController.deleteAccount);
 
-// Add to user routes
-router.post('/:id/rate', userController.rateAgent);
+// Rating routes
+router.post('/:id/rate', ratingValidation, userController.rateAgent);
+router.get('/:id/rating', userController.getUserRating);
+router.delete('/:id/rating', userController.deleteRating);
+router.get('/:id/reviews', userController.getAgentReviews);
+
+// Save user route
 router.post('/save-user', userController.saveUser);
 
 // Admin only routes
