@@ -19,6 +19,9 @@ const messageRoutes = require('./routes/messageRoutes');
 const savedSearchesRoutes = require('./routes/savedSearchesRoutes');
 const bookingRoutes = require('./routes/bookingRoutes');
 const adminUsersRoutes = require('./routes/adminUsersRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
+
+const emailNotificationsJob = require('./jobs/emailNotificationsJob');
 
 const { setupWebSocket } = require('./hooks/websocket');
 
@@ -132,6 +135,7 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/saved-searches', savedSearchesRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/admin-users', adminUsersRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // ========== ERROR HANDLING ==========
 // 404 handler
@@ -175,6 +179,8 @@ const startServer = async () => {
       console.log(`📁 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`🌐 Access the API at: http://localhost:${PORT}`);
       console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+
+      emailNotificationsJob.start();
       
       if (!dbConnected) {
         console.log(`\n⚠️ IMPORTANT: MongoDB is not connected!`);

@@ -7,6 +7,7 @@ const { validationResult } = require('express-validator');
 const cloudinary = require('../config/cloudinary');
 const mongoose = require('mongoose');
 const { broadcastToUser, broadcastToConversation } = require('../hooks/websocket');
+const NotificationController = require('./notificationController');
 
 // Simple in-memory cache for business chat performance
 const messageCache = new Map();
@@ -239,6 +240,12 @@ class MessageController {
       // Create and save message
       const message = new Message(messageData);
       await message.save();
+
+       await NotificationController.createMessageNotification(
+          message._id,
+          finalReceiverId,
+          senderId
+        );
       
       // Update conversation with last message
       conversation.lastMessage = message._id;

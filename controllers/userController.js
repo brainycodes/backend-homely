@@ -6,6 +6,7 @@ const Rating = require('../models/Rating'); // Add this import
 const { validationResult } = require('express-validator');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const NotificationController = require('./notificationController');
 
 class UserController {
   // Get all users (admin only)
@@ -1425,6 +1426,11 @@ async getSavedItems(req, res) {
       });
 
       await newRating.save();
+
+      await NotificationController.createReviewNotification(
+        newRating._id,
+        agentId
+      );
 
       // Get updated agent data
       const updatedAgent = await User.findById(agentId);

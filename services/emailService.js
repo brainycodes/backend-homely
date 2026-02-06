@@ -355,6 +355,100 @@ class EmailService {
     }
   }
 
+    // New method for sending notification emails
+  async sendMail(mailOptions) {
+    try {
+      const defaultOptions = {
+        from: `"Homely 🏡" <${process.env.GMAIL_USER}>`,
+        ...mailOptions
+      };
+
+      await this.transporter.sendMail(defaultOptions);
+      return true;
+    } catch (error) {
+      console.error('Email sending error:', error);
+      return false;
+    }
+  }
+
+  // Send saved search match email
+  async sendSavedSearchMatchEmail(user, search, item, isProperty = true) {
+    const itemUrl = `${process.env.CLIENT_URL}/${isProperty ? 'properties' : 'services'}/${item._id}`;
+    
+    const mailOptions = {
+      to: user.email,
+      subject: `🏡 New ${isProperty ? 'Property' : 'Service'} Matching Your Search`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px; }
+            .item-card { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin: 20px 0; }
+            .item-image { width: 100%; height: 200px; object-fit: cover; border-radius: 8px; margin-bottom: 15px; }
+            .item-title { font-size: 18px; font-weight: bold; color: #111827; margin-bottom: 5px; }
+            .item-price { font-size: 20px; color: #10b981; font-weight: bold; margin-bottom: 10px; }
+            .item-location { color: #6b7280; margin-bottom: 15px; }
+            .button { display: inline-block; background: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; }
+            .search-info { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 15px; margin: 20px 0; }
+            .footer { margin-top: 30px; text-align: center; color: #666; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>Saved Search Match Found!</h1>
+              <p>We found a new ${isProperty ? 'property' : 'service'} matching your criteria</p>
+            </div>
+            
+            <div class="content">
+              <h2>Hello ${user.firstName},</h2>
+              <p>Great news! We found a new ${isProperty ? 'property' : 'service'} that matches your saved search:</p>
+              
+              <div class="search-info">
+                <p><strong>Search:</strong> "${search.searchQuery}"</p>
+                ${search.filters.location ? `<p><strong>Location:</strong> ${search.filters.location}</p>` : ''}
+                ${search.filters.priceRange?.length === 2 ? 
+                  `<p><strong>Price Range:</strong> ₦${search.filters.priceRange[0].toLocaleString()} - ₦${search.filters.priceRange[1].toLocaleString()}</p>` : 
+                  ''}
+              </div>
+              
+              <div class="item-card">
+                ${item.images?.[0]?.url ? 
+                  `<img src="${item.images[0].url}" alt="${item.title}" class="item-image">` : 
+                  ''}
+                <h3 class="item-title">${item.title}</h3>
+                <div class="item-price">₦${item.price.toLocaleString()}</div>
+                <div class="item-location">📍 ${item.location}</div>
+                ${item.description ? `<p>${item.description.substring(0, 150)}...</p>` : ''}
+              </div>
+              
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${itemUrl}" class="button">
+                  View ${isProperty ? 'Property' : 'Service'} Details
+                </a>
+              </div>
+              
+              <p>This email was sent because you have saved searches with email notifications enabled.</p>
+              
+              <div class="footer">
+                <p>To manage your saved searches and notification preferences, visit your account settings.</p>
+                <p>© ${new Date().getFullYear()} Homely. All rights reserved.</p>
+              </div>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+    
+    return this.sendMail(mailOptions);
+  }
+
+
   async sendWelcomeEmail(user) {
     const userDashboardUrl = `${process.env.CLIENT_URL}/dashboard`;
     const profileUrl = `${process.env.CLIENT_URL}/dashboard/profile`;

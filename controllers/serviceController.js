@@ -4,6 +4,7 @@ const Booking = require('../models/Booking');
 const { validationResult } = require('express-validator');
 const moment = require('moment');
 const cloudinary = require('../config/cloudinary');
+const NotificationController = require('./notificationController');
 
 class ServiceController {
   // Create new service - FIXED
@@ -131,6 +132,8 @@ class ServiceController {
       
       const service = new Service(serviceData);
       await service.save();
+
+      await NotificationController.checkSavedSearchesForService(service._id);
       
       // Populate the postedBy and provider fields
       const populatedService = await Service.findById(service._id)
@@ -831,6 +834,13 @@ class ServiceController {
         // Add to saved
         user.savedServices.push(service._id);
         service.saves += 1;
+
+         if (service.postedBy.toString() !== req.user.id) {
+          await NotificationController.createServiceSaveNotification(
+            service._id,
+            req.user.id
+          );
+        }
       }
       
       await user.save();

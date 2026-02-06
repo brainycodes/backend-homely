@@ -3,6 +3,7 @@ const User = require('../models/User');
 const { validationResult } = require('express-validator');
 const moment = require('moment');
 const cloudinary = require('../config/cloudinary');
+const NotificationController = require('./notificationController');
 
 class PropertyController {
   // Create new property
@@ -114,6 +115,8 @@ class PropertyController {
       
       const property = new Property(propertyData);
       await property.save();
+
+      await NotificationController.checkSavedSearchesForProperty(property._id);
       
       // Populate the postedBy field with all needed fields
       const populatedProperty = await Property.findById(property._id)
@@ -290,6 +293,13 @@ class PropertyController {
       
       // Increment views
       await Property.findByIdAndUpdate(req.params.id, { $inc: { views: 1 } });
+
+      if (property && property.postedBy.toString() !== req.user?.id) {
+        await NotificationController.createPropertyViewNotification(
+          req.params.id,
+          req.user?.id
+        );
+      }
       
       res.status(200).json({
         success: true,
@@ -715,6 +725,13 @@ class PropertyController {
         // Add to saved
         user.savedProperties.push(property._id);
         property.saves += 1;
+
+        if (property.postedBy.toString() !== req.user.id) {
+          await NotificationController.createPropertySaveNotification(
+            property._id,
+            req.user.id
+          );
+        }
       }
       
       await user.save();

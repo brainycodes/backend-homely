@@ -150,6 +150,30 @@ const userSchema = new mongoose.Schema({
   profileImage: {
     type: String
   },
+
+  notificationPreferences: {
+    email: {
+      newMessages: { type: Boolean, default: true },
+      newProperties: { type: Boolean, default: true },
+      newServices: { type: Boolean, default: true },
+      savedMatches: { type: Boolean, default: true },
+      reviews: { type: Boolean, default: true },
+      system: { type: Boolean, default: true }
+    },
+    push: {
+      newMessages: { type: Boolean, default: true },
+      newProperties: { type: Boolean, default: true },
+      newServices: { type: Boolean, default: true },
+      savedMatches: { type: Boolean, default: true },
+      reviews: { type: Boolean, default: true }
+    }
+  },
+  
+  lastNotificationCheck: {
+    type: Date,
+    default: Date.now
+  },
+
   // Add KYC field to the main schema
   kyc: {
     type: kycSchema,
