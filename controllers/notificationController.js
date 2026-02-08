@@ -51,7 +51,9 @@ class NotificationController {
       // Get total count
       const total = await Notification.countDocuments({ user: userId });
       
-      // Format notifications
+      // Format notifications - FIX: Store this in a variable to use in map
+      const controller = this;
+      
       const formattedNotifications = notifications.map(notification => ({
         id: notification._id,
         type: notification.type,
@@ -61,8 +63,8 @@ class NotificationController {
         time: notification.timeAgo,
         timeExact: notification.createdAt,
         data: notification.data,
-        icon: this.getNotificationIcon(notification.type),
-        color: this.getNotificationColor(notification.type)
+        icon: controller.getNotificationIcon(notification.type), // Use stored reference
+        color: controller.getNotificationColor(notification.type) // Use stored reference
       }));
       
       res.status(200).json({
