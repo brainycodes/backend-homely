@@ -3,6 +3,8 @@ const router = express.Router();
 const { body } = require('express-validator');
 const adminController = require('../controllers/adminController');
 const { protect, isAdmin, isSuperAdmin } = require('../middleware/authMiddleware');
+const reportController = require('../controllers/reportController');
+const settingsController = require('../controllers/settingsController');
 
 // ========== PUBLIC ROUTES ==========
 
@@ -39,6 +41,35 @@ const checkAdmin = (req, res, next) => {
 
 // Apply admin check to all protected routes
 router.use(checkAdmin);
+
+// Settings routes - THESE MUST COME FIRST
+router.get('/settings', settingsController.getSettings);
+router.put('/settings', settingsController.updateSettings);
+router.post('/settings/reset', settingsController.resetSettings);
+
+// Report management
+router.get('/reports', reportController.getAllReports);
+router.get('/reports/stats/overview', reportController.getReportStats);
+router.get('/reports/:id', reportController.getReportById);
+router.patch('/reports/:id/status', reportController.updateReportStatus);
+router.post('/reports/:id/resolve', reportController.resolveReport);
+router.post('/reports/:id/dismiss', reportController.dismissReport);
+router.post('/reports/:id/notes', reportController.addAdminNote);
+router.post('/reports/bulk', reportController.bulkAction);
+
+// User actions (for agent reports)
+router.post('/users/:userId/warn', reportController.warnUser);
+router.post('/users/:userId/suspend', reportController.suspendUser);
+router.post('/users/:userId/ban', reportController.banUser);
+
+// Content actions
+router.post('/properties/:propertyId/remove', reportController.removeProperty);
+router.post('/properties/:propertyId/unverify', reportController.unverifyProperty);
+router.post('/services/:serviceId/remove', reportController.removeService);
+router.post('/services/:serviceId/unverify', reportController.unverifyService);
+
+// Export
+router.get('/reports/export', reportController.exportReports);
 
 // ========== PROFILE ROUTES ==========
 
@@ -188,5 +219,6 @@ router.delete('/:id', isSuperAdmin, adminController.deleteAdmin);
 
 // Reactivate admin - Only Super Admin
 router.put('/:id/reactivate', isSuperAdmin, adminController.reactivateAdmin);
+
 
 module.exports = router;

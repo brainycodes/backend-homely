@@ -6,16 +6,12 @@ const { protect, hasPermission } = require('../middleware/authMiddleware');
 // All routes require authentication
 router.use(protect);
 
-// Get all dashboard statistics
+
+// Dashboard routes
 router.get('/stats', adminDashboardController.getDashboardStats);
-
-// Get pending counts for sidebar
 router.get('/pending-counts', adminDashboardController.getPendingCounts);
-
-// Get recent activities
 router.get('/recent-activities', adminDashboardController.getRecentActivities);
+router.get('/system-health', adminDashboardController.getSystemHealth);
 
-// Get system health
-router.get('/system-health', adminDashboardController.getSystemStats);
 
 module.exports = router;

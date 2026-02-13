@@ -21,6 +21,7 @@ const bookingRoutes = require('./routes/bookingRoutes');
 const adminUsersRoutes = require('./routes/adminUsersRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const adminDashboardRoutes = require('./routes/adminDashboardRoutes');
+const reportRoutes = require('./routes/reportRoutes');
 
 const emailNotificationsJob = require('./jobs/emailNotificationsJob');
 
@@ -139,6 +140,7 @@ app.use('/api/bookings', bookingRoutes);
 app.use('/api/admin-users', adminUsersRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin/dashboard', adminDashboardRoutes);
+app.use('/api/reports', reportRoutes);
 
 // ========== ERROR HANDLING ==========
 // 404 handler
