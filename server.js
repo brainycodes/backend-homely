@@ -22,6 +22,7 @@ const adminUsersRoutes = require('./routes/adminUsersRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const adminDashboardRoutes = require('./routes/adminDashboardRoutes');
 const reportRoutes = require('./routes/reportRoutes');
+const blogRoutes = require('./routes/blogRoutes');
 
 const emailNotificationsJob = require('./jobs/emailNotificationsJob');
 
@@ -141,6 +142,7 @@ app.use('/api/admin-users', adminUsersRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin/dashboard', adminDashboardRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/blog', blogRoutes);
 
 // ========== ERROR HANDLING ==========
 // 404 handler

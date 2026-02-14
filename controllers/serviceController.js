@@ -447,23 +447,63 @@ class ServiceController {
         images = [...images, ...newImages];
       }
       
-      // Update service data
+      // Get user for provider info
+      const user = await User.findById(req.user.id);
+      
+      // Create provider object with existing values and updates
+      const providerData = {
+        id: service.provider.id, // Keep the existing provider id
+        name: `${user.firstName} ${user.lastName}`,
+        avatar: user.profileImage || service.provider.avatar || '',
+        specialization: req.body.specialization || service.provider.specialization || '',
+        rating: service.provider.rating || 0,
+        experience: req.body.experience || service.provider.experience || '',
+        teamSize: parseInt(req.body.teamSize || service.provider.teamSize || 1),
+        bio: req.body.bio || user.bio || service.provider.bio || ''
+      };
+
+      // Handle languages array
+      if (req.body.languages) {
+        providerData.languages = Array.isArray(req.body.languages)
+          ? req.body.languages
+          : req.body.languages.split(',').map(item => item.trim()).filter(item => item);
+      } else {
+        providerData.languages = service.provider.languages || [];
+      }
+
+      // Handle certifications array
+      if (req.body.certifications) {
+        providerData.certifications = Array.isArray(req.body.certifications)
+          ? req.body.certifications
+          : req.body.certifications.split(',').map(item => item.trim()).filter(item => item);
+      } else {
+        providerData.certifications = service.provider.certifications || [];
+      }
+      
+      // Create update data with provider info
       const updateData = {
         ...req.body,
-        images
+        images,
+        provider: providerData
       };
       
-      // Convert string arrays to arrays
+      // Convert string arrays to arrays for main service fields
       if (req.body.servicesIncluded) {
         updateData.servicesIncluded = Array.isArray(req.body.servicesIncluded)
-          ? updateData.servicesIncluded
-          : req.body.servicesIncluded.split(',').map(item => item.trim());
+          ? req.body.servicesIncluded
+          : req.body.servicesIncluded.split(',').map(item => item.trim()).filter(item => item);
       }
       
       if (req.body.tags) {
         updateData.tags = Array.isArray(req.body.tags)
-          ? updateData.tags
-          : req.body.tags.split(',').map(item => item.trim());
+          ? req.body.tags
+          : req.body.tags.split(',').map(item => item.trim()).filter(item => item);
+      }
+      
+      if (req.body.serviceAreas) {
+        updateData.serviceAreas = Array.isArray(req.body.serviceAreas)
+          ? req.body.serviceAreas
+          : req.body.serviceAreas.split(',').map(item => item.trim()).filter(item => item);
       }
       
       // Parse packages if provided
@@ -491,19 +531,12 @@ class ServiceController {
       if (req.body.completedJobs) updateData.completedJobs = parseInt(req.body.completedJobs);
       if (req.body.teamSize) updateData.teamSize = parseInt(req.body.teamSize);
       
-      // Update provider info
-      if (req.user.id.toString() === service.postedBy.toString()) {
-        const user = await User.findById(req.user.id);
-        if (user) {
-          updateData.provider = {
-            ...updateData.provider,
-            name: `${user.firstName} ${user.lastName}`,
-            avatar: user.profileImage || service.provider.avatar,
-            profileImage: user.profileImage || service.provider.profileImage || service.provider.avatar,
-            bio: req.body.bio || user.bio || service.provider.bio
-          };
-        }
-      }
+      // Update contact info
+      updateData.contactInfo = {
+        phone: req.body.contactPhone || service.contactInfo.phone,
+        email: req.body.contactEmail || service.contactInfo.email,
+        whatsapp: req.body.contactWhatsapp || service.contactInfo.whatsapp
+      };
       
       const updatedService = await Service.findByIdAndUpdate(
         req.params.id,
