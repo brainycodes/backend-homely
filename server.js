@@ -35,7 +35,7 @@ const app = express();
 app.use(cors({
   origin: [
     'http://localhost:3000',
-    'https://homely-theta.vercel.app',
+    'https://homely-estate.vercel.app',
     'https://homely.com.ng',
     process.env.CLIENT_URL || 'http://localhost:3000'
   ],
